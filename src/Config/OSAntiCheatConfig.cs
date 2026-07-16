@@ -11,7 +11,7 @@ namespace OSAntiCheat.Config;
 public sealed class OSAntiCheatConfig : BasePluginConfig
 {
     // Bump when adding fields so CounterStrikeSharp merges them into an existing config file.
-    public override int Version { get; set; } = 13;
+    public override int Version { get; set; } = 14;
 
     /// <summary>
     /// Include bots as detection subjects. Bots have perfect server-driven aim so they trip the
@@ -173,17 +173,17 @@ public sealed class OSAntiCheatConfig : BasePluginConfig
     [JsonPropertyName("NullTestAimDeg")]
     public float NullTestAimDeg { get; set; } = 5f;
 
-    /// <summary>Unspotted-enemy samples to accumulate before the detector evaluates and may emit.
-    /// A signal is emitted at most once per this many samples, so heavier exposure emits more.</summary>
-    [JsonPropertyName("NullTestMinSamples")]
-    public int NullTestMinSamples { get; set; } = 2000;
+    /// <summary>Discordant McNemar observations (present-hit-not-past PLUS past-hit-not-present)
+    /// required before the z-score is trusted enough to emit. Guards against low-evidence noise.</summary>
+    [JsonPropertyName("NullTestMinObservations")]
+    public int NullTestMinObservations { get; set; } = 30;
 
     /// <summary>
-    /// Excess (present-rate − past-rate) above which the null test emits. START AT 0 to detect the
-    /// whole population and log the distribution, then RAISE until the regulars fall out — that
-    /// crossover is the baseline. Offline reference: legit p50/p90/p99 = 0.0007/0.0020/0.0037,
-    /// verified cheaters 0.005–0.012, so the baseline is likely around 0.004–0.008.
+    /// McNemar z-score at/above which the null test emits. z is a standardised statistic, so this
+    /// is largely self-calibrating and server-independent: z≈3 ≈ 99.9% confidence the present-over-
+    /// past asymmetry is not chance. Raise for fewer/stronger flags. A regular with no real effect
+    /// keeps z≈0 however long they play, so this no longer confounds playtime the way raw excess did.
     /// </summary>
-    [JsonPropertyName("NullTestExcessThreshold")]
-    public float NullTestExcessThreshold { get; set; } = 0f;
+    [JsonPropertyName("NullTestMinZ")]
+    public float NullTestMinZ { get; set; } = 3.0f;
 }

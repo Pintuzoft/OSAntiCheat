@@ -503,11 +503,22 @@ tusentals per-tick-sampel. Slutsats: **XGuardians värde för OSS är bekräftel
 en kontroll funkar — inte att ersätta nolltestet.** För vår rikare data (pos + spotted) ÄR
 nolltestet det starkare instrumentet.
 
-Brasklapp: n=3, överskotten små (+0,012), Pintuz (legit) ligger rank 3 tätt bakom. Sluta trimma
+Brasklapp: n=3, överskotten små (+0,012), en stammis (legit) ligger rank 3 tätt bakom. Sluta trimma
 mot 3 fuskare (dokumenterad fälla) — skaffa riktig n innan mer portande.
 
-- [x] ~~Promota nolltestet till en LIVE-detektor~~ → `NullTestDetector` (`wallhack.nulltest`) byggd,
-      config-tunbar (`NullTestExcessThreshold` start 0 → höj tills stammisar faller ur = baseline)
+- [x] ~~Promota nolltestet till en LIVE-detektor~~ → `NullTestDetector` (`wallhack.nulltest`), v0.6.0.
+
+### v0.6.1 — nolltestet blir ett McNemar z-test
+
+Live-data (storspelskväll) visade att rå excess var (a) brusigt vid låg N — toppar på +2–6pp över
+1000 samples var ren slump och konvergerade till 0,1–0,5pp när N växte — och (b) ackumulerade
+score → hela populationen på Review, dvs en speltids-mätare igen. Fix: **McNemar** z = (b−c)/√(b+c)
+över de diskordanta sample (present-hit-ej-past `b` vs past-hit-ej-present `c`). Skicklighet
+cancelar (concordant räknas ej), själv-kalibrerande (z≥3 ≈ 99,9% att asymmetrin ej är slump), ingen
+speltids-förväxling (noll-effekt → z≈0 oavsett speltid), eskalerings-gate mot spam. Config:
+`NullTestMinObservations`=30, `NullTestMinZ`=3.0. 4 nya enhetstester.
+- [ ] Kör 6.1 live → bekräfta att stammisarna håller sig under z-tröskeln (aggressiva positionerare
+      med äkta liten effekt kan eskalera långsamt → effektstorlek + korroboration avgör)
 - [ ] Ev. kombinera: kill-ankra/stillhets-grinda nolltestet (present-vs-past PÅ pre-kill-fönstret)
 
 ### Ban-list-sample + typning av fuskare (2026-07-16)

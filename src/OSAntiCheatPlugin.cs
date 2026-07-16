@@ -25,7 +25,7 @@ namespace OSAntiCheat;
 public sealed class OSAntiCheatPlugin : BasePlugin, IPluginConfig<OSAntiCheatConfig>
 {
     public override string ModuleName => "OSAntiCheat";
-    public override string ModuleVersion => "0.6.0";
+    public override string ModuleVersion => "0.6.1";
     public override string ModuleAuthor => "DreamHealer";
     public override string ModuleDescription => "Server-side heuristic anticheat for CS2";
 
@@ -70,7 +70,7 @@ public sealed class OSAntiCheatPlugin : BasePlugin, IPluginConfig<OSAntiCheatCon
         _wallhackGaze = new WallhackGazeDetector(
             config.WallhackGazeConeDeg, config.WallhackGazeTriggerScore,
             config.WallhackGazeRoundStartMultiplier);
-        _nullTest = new NullTestDetector(config.NullTestMinSamples, config.NullTestExcessThreshold);
+        _nullTest = new NullTestDetector(config.NullTestMinObservations, config.NullTestMinZ);
     }
 
     public override void Load(bool hotReload)
@@ -212,9 +212,10 @@ public sealed class OSAntiCheatPlugin : BasePlugin, IPluginConfig<OSAntiCheatCon
             float bestAimErr = aimThreshold;
             WallhackGazeDetector.GazeSample? bestGaze = null;
             float bestGazeErr = gazeCone;
-            // Null test tally over ALL unspotted enemies this poll: present-position hits vs
-            // past-position (control) hits, from the same crosshair.
-            int ntSamples = 0, ntNow = 0, ntPast = 0;
+            // Null test: McNemar discordant tally over ALL unspotted enemies this poll. Only the
+            // samples where present and past DISAGREE carry information — present-hit-not-past (b)
+            // vs past-hit-not-present (c). Concordant samples (both/neither) are skipped.
+            int ntNowOnly = 0, ntPastOnly = 0;
 
             foreach (var enemy in Utilities.GetPlayers())
             {
@@ -250,9 +251,10 @@ public sealed class OSAntiCheatPlugin : BasePlugin, IPluginConfig<OSAntiCheatCon
                     _tracking.For(enemy.Slot) is { } enemyTracker &&
                     TryPastOrigin(enemyTracker, now, nullLag, out var pastFeet))
                 {
-                    ntSamples++;
-                    if (err <= nullAimDeg) ntNow++;
-                    if (Geometry.NearestBodyAimError(eye, angles, pastFeet) <= nullAimDeg) ntPast++;
+                    bool onNow = err <= nullAimDeg;
+                    bool onPast = Geometry.NearestBodyAimError(eye, angles, pastFeet) <= nullAimDeg;
+                    if (onNow && !onPast) ntNowOnly++;
+                    else if (onPast && !onNow) ntPastOnly++;
                 }
             }
 
@@ -261,7 +263,7 @@ public sealed class OSAntiCheatPlugin : BasePlugin, IPluginConfig<OSAntiCheatCon
             if (Config.EnableWallhackGaze)
                 Report(_wallhackGaze, _wallhackGaze.Observe(slot, now, bestGaze));
             if (Config.EnableNullTest)
-                Report(_nullTest, _nullTest.Accumulate(slot, now, ntSamples, ntNow, ntPast));
+                Report(_nullTest, _nullTest.Accumulate(slot, now, ntNowOnly, ntPastOnly));
         }
     }
 

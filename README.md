@@ -19,7 +19,7 @@ Working detectors, verified by unit tests against synthetic tick data:
 | **Triggerbot** | Shot fired too fast after the crosshair **crosses onto** an enemy | Repetition-gated; ignores holds, sprays, bots, and enemies walking into a static aim |
 | **Wallhack (track)** ⭐ | Aim **follows a moving unspotted enemy** through geometry — the crosshair tracks its bearing | Uses CS2's spotted system as the LOS signal. Requires the view to *follow* the movement, so a held angle an enemy crosses is not flagged (fixed after live-data false positives) |
 | **Wallhack (gaze)** ⭐ | **Gaze follows** an unspotted enemy's movement — glancing/tracking, not a precise lock | View yaw must move *in step* with the enemy's bearing (not just point in its direction). Round-start window weighted higher (no legit info yet) |
-| **Null test** ⭐ *(new)* | Crosshair on an **unspotted** enemy's *present* position more often than on its *1.5s-past* position | Measures an information channel, not skill: game sense correlates aim with an enemy's past too, so the *excess* (present − past) isolates present-knowledge-while-unseen = wallhack. Threshold calibrated on your own population — see below |
+| **Null test** ⭐ | Crosshair on an **unspotted** enemy's *present* position more often than on its *1.5s-past* position | Measures an information channel, not skill: game sense correlates aim with the past too, so the present-over-past asymmetry isolates present-knowledge-while-unseen = wallhack. Scored as a McNemar z (self-calibrating; skill cancels; no playtime confound) — see below |
 
 All signals feed a **fusion engine** that triangulates independent axes into a per-player
 suspicion score (graded confidence, exponential decay, corroboration bonus, `Watch`/`Review`
@@ -53,10 +53,17 @@ Replaying 11 demos over the server's own ban list (verified cheaters + their mat
 found the tracking detector fires on the *regulars* (they are the ones scanning), while the **null
 test** — present-position hits minus 1.5s-past-position hits on unspotted enemies — ranked the
 verified cheaters **1st, 2nd and 8th of 70**. It is now a live detector (`wallhack.nulltest`).
-Offline, legit players' excess sits at p50/p90/p99 = 0.0007 / 0.0020 / 0.0037 and verified
-cheaters at 0.005–0.012. Calibrate on your own population: `NullTestExcessThreshold` starts at **0**
-so it flags everyone and logs the distribution, then raise it until the regulars fall out — that
-crossover is your baseline, and anyone above it is the anomaly. Still calibration-phase, log-only.
+### v0.6.1 — scored as a McNemar z-test
+
+Live data exposed two flaws in the raw excess (present-rate − past-rate): it was noisy at low
+sample counts (early +2–6pp readings were chance, converging to ~0.1–0.5pp), and its accumulated
+score just re-measured playtime — the whole population drifted to Review on exposure alone. v0.6.1
+replaces it with a **McNemar test**: of the samples where present and past *disagree*, it forms
+`z = (b − c) / sqrt(b + c)` from present-hit-not-past (`b`) vs past-hit-not-present (`c`). Skill
+cancels (concordant hits are ignored), it is self-calibrating (`z ≥ 3` ≈ 99.9% the asymmetry is
+not chance, server-independent), and a player with no real effect stays at `z ≈ 0` however long
+they play — so it no longer confounds playtime. Emission is escalation-gated to one signal per
+z-band. Config: `NullTestMinObservations` (30) and `NullTestMinZ` (3.0). Still log-only.
 
 See [TODO.md](TODO.md) for the full roadmap, including the wallhack / soft-aim / information-
 causality detectors planned for later phases (which depend on server-side raycasting and
