@@ -1,0 +1,23 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <LangVersion>latest</LangVersion>
+    <RootNamespace>OSAntiCheat</RootNamespace>
+    <AssemblyName>OSAntiCheat</AssemblyName>
+    <Version>0.6.0</Version>
+    <!-- Required so CounterStrikeSharp can hot-load the plugin assembly -->
+    <EnableDynamicLoading>true</EnableDynamicLoading>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- The API is provided by the CounterStrikeSharp host at runtime,
+         so we compile against it but exclude its runtime assets. -->
+    <PackageReference Include="CounterStrikeSharp.API" Version="1.0.*">
+      <ExcludeAssets>runtime</ExcludeAssets>
+    </PackageReference>
+  </ItemGroup>
+
+</Project>

@@ -1,0 +1,18 @@
+bin/
+obj/
+dist/
+*.user
+.vs/
+.idea/
+
+# XGuardian labelled feature data (local validation only, do not commit)
+xguardian-data/
+
+# Downloaded CS2 demos (local validation only)
+demos/
+
+# local analysis scratch
+scratch_wallers.csv
+
+# Private third-party data (ban list, real player IDs) — never publish
+private/
