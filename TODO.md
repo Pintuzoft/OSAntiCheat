@@ -780,3 +780,53 @@ etiketterad mängd → *sen* validera på held-out. Discovery matar etikettering
       inte inbakat i en enda detektor.
 - [ ] Arkiv-mining: skanna alla demos → kandidater, men grinda på ban-lista/oberoende-axel/manuell
       granskning innan något räknas som positiv. Aldrig cirkulär validering.
+
+## ⭐ Recoil-axeln testad end-to-end + RÄDDAD som smal detektor — 2026-07-17
+
+Byggde hela pipelinen och körde den på riktig data samma dag: `DemoReplay` recoil-ratio (cross-spray-
+spridning ÷ pull; tapping uteslutet vid källan via kadens 0,13s + pull-gate ≥2°), `BanCheck`-recoil-
+korsning, och `RecoilSynth` (syntetisk maskin-positiv, **inget fusk körs** — anti-recoil är deterministiskt).
+
+**Real data (4776 demos, senaste året, 17k spray-sessioner):**
+- Människo-golv: per-session **0,06** (ägaren Pintuz i botten!), per-spelare (median ≥2 sess) **0,21**.
+- Jämn kontinuum, **inget separerat kluster**. Lägsta = skickliga regulars (bästa legit-kontrollen 0,09 osv).
+- **Första (för hastiga) slutsats: "mäter skicklighet, dött"** — samma som dwell/target-switch/timing.
+
+**Ban-korsning är OGILTIG för anti-recoil (VAC-oberoende insikt från användaren):** VAC fångar inte
+macro/hårdvaru/externt anti-recoil → inga giltiga etiketter i arkivet. "Ingen ban-anrikning" betyder
+"vet ej", inte "frikänd". Ban-datan dessutom mest 8–20 år gamla orelaterade VAC-bans. → arkiv+ban-
+discovery är en återvändsgränd FÖR DEN HÄR fusktypen.
+
+**RecoilSynth RÄDDADE axeln (mot min pessimism):** ett *perfekt* script → ratio **~0,00**, långt under
+människo-golvet 0,06. Kvantisering försumbar. **Alltså är 0,06 äkta människo-motorbrus, inte mät-golvet
+— det FINNS ett gap under människorna.** Humaniserings-kostnad: script måste injicera **≥0,15° per-skott-
+jitter** för att nå 0,06 och gömma sig.
+```
+sigma=0(perfekt) 0.00 | 0.05->0.019 | 0.10->0.038 | 0.15->0.057(korsar) | 0.20->0.076
+```
+
+**REVIDERAD DOM — smal hög-precisions-detektor, inte död:**
+- Tröskel **~0,04** = bortom mänsklig räckvidd (17k sessioner golvade 0,06) → ~noll FP.
+- Fångar **ohumaniserat** anti-recoil (billiga script). Låg recall (missar ≥0,15° jitter), men
+  **trovärdig när den fyrar** → förtjänar "anti-recoil"-etiketten där, för ingen människa når dit.
+- Real data hade inget <0,06 → inga naiva scripters i fönstret (spelade ej, eller humaniserar).
+- [ ] Ev. wire:a in som fusions-axel med tröskel ~0,04 (log-only), etikett "trolig anti-recoil" ENDAST
+      under golvet. Mät verklig CS2-vinkel-kvantisering från en demo för att bekräfta q-kolumnen.
+
+**Lärdomar (dagens):**
+- **Testa innan du dömer — åt BÅDA håll.** Jag kallade axeln död för att människor når lågt; syntesen
+  visade ett gap under dem. Kalibreringslabbet fångade *både* skicklighets-confounden OCH min för-hastiga
+  dödförklaring.
+- **Deterministiska fusk är syntetiserbara** → maskin-ankare utan att köra fusk / riskera VAC. (Wallhack
+  är perceptions-baserat → behöver riktiga demos; anti-recoil är ren mekanik.)
+- **Skicklighet vs bortom-mänsklig-precision:** recoil-*konsistens* mäter det skicklighet producerar,
+  MEN en tröskel *under* människo-golvet separerar ändå den naiva maskinen (som är bortom mänsklig
+  precision). Jfr nolltestet som separerar via *information* (ej köpbar med skicklighet).
+
+**Design-princip: typade ledtrådar utan confirmation bias (skriv INTE bara "anti-recoil" till admin):**
+- Larmet ska **lära admin skilja fusket från dess legit-tvilling** — visa BÅDE det fällande OCH det
+  frikännande mönstret ("script = identiskt varje spray, missar aldrig; skicklig människa varierar,
+  missar ibland — ser du variation → legit"). Ger admin ett sätt att säga NEJ.
+- **Bevis, inte anklagelse:** larmet bär klippet/siffrorna + legit-mönstret, inte en dom att bekräfta.
+- **Bara validerade axlar får en etikett.** Wallhack (nolltest) har förtjänat sin; anti-recoil förtjänar
+  sin ENDAST under golvet ~0,04. Arkitekturen vet vilka axlar som fyrade → mappning axel→etikett naturlig.
