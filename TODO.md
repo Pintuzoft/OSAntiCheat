@@ -831,7 +831,7 @@ sigma=0(perfekt) 0.00 | 0.05->0.019 | 0.10->0.038 | 0.15->0.057(korsar) | 0.20->
 - **Bara validerade axlar får en etikett.** Wallhack (nolltest) har förtjänat sin; anti-recoil förtjänar
   sin ENDAST under golvet ~0,04. Arkitekturen vet vilka axlar som fyrade → mappning axel→etikett naturlig.
 
-## ❌ wallhack.revisit (dubbelpeeken) testad → DÖD som auto-detektor — 2026-07-18
+## ⭐ wallhack.revisit (dubbelpeeken): DÖD som auto-dom, LEVER som misstänkt-lyftare — 2026-07-18
 
 Byggd i `DemoReplay` (per (observer, osedd fiende): on-target-dwell → off >20° → on igen inom 3s, still
 fiende), + `--revisit-detail <steamId>` som dumpar varje episod (tick+tid+fiende-pos) för granskning.
@@ -864,3 +864,26 @@ kan spotta en avsiktlig dubbelpeek; vår statistik fångade geometrin, inte avsi
       via samma `--*-detail`-mönster som revisit-dumpen — DET ärver past-controlen.
 - Detektor-lärdom att behålla: `wallhack.revisit` **dubbelräknar klungor** (per-par-fyrning). Om något
   liknande byggs igen: deduplicera episoder i tid per observatör, inte per fiende-par.
+
+### ⭐ ÅTERUPPLIVAD som misstänkt-lyftare (2026-07-18) — omcentrering: misstänkt till admins, INTE auto-dom
+
+Nyckel-insikten (användaren): målet är inte en perfekt statistisk separator — det är att **flagga en
+misstänkt till admins.** Wallhack är subjektivt → MÅSTE granskas av människa → dubbelpeeken behöver inte
+noll FP, den behöver vara **specifik nog att en träff är värd 30 sek granskning** + producera **klippet**.
+Det var mitt "död"-utlåtande ovan som var för snabbt: dött som *auto-dom*, inte som *misstänkt-lyftare*.
+
+**Fixen som gjorde den specifik:** dwell 0,15s → **~1s (20 polls) BÅDA parkeringarna, på SAMMA fiende**
+(samma fiende var redan strukturellt via per-par-state). En 1s-parkering på en still dold fiende, två
+gånger, är avsiktlig — svep/klungor/kartkolls-panorering kan inte hålla 1s. Fire rate: 89% → 44% (0,15s
+dwell) → **~7%** (1s, litet lokalt urval) — sällsynt, granskbar volym, ~1 episod per lång session.
+
+**Roll (korrekt tak per fusktyp):**
+- Auto-ban: bara signaturer *bortom mänsklig räckvidd* (naivt anti-recoil <0,04, omöjliga vinklar).
+- **Wallhack: misstänkt-lyftare + klipp → admin granskar → admin bannar.** Aldrig auto-ban på ett z-tal.
+
+`--revisit-detail <steamId>` dumpar varje episod (tick+tid+fiende-pos) → admin hoppar dit i demon och gör
+off-angle-bedömningen. **I rätt omständigheter (still fiende, off-angle, 1s+ parkering ×2 på samma fiende)
+är detta ett av de bästa sätten att hitta en wallhacker** — ögat ser avsikten, verktyget hittar ögonblicket.
+- [ ] Full-arkiv-körning för riktig fire rate (~7%?) + granska topp-träffarna (är de äkta dubbelpeekar?).
+- [ ] Om volymen håller: wire:a in log-only som en wallhack-*misstänkt*-axel (aldrig auto-action), med
+      klipp-dump i larmet (typad ledtråd + bevis, inte anklagelse).
