@@ -169,6 +169,7 @@ Console.WriteLine($"Replaying {demoFiles.Count} demo(s), poll {pollInterval * 10
 // the percentiles and a bounded top list; drop the rest.
 var allScores = new List<float>();
 var recoilResults = new List<(string name, ulong id, float spread, float pull, float ratio, int sprays, string demo)>();
+var revisitResults = new List<(string name, ulong id, int count, float rate, float mins, string demo)>();
 var topResults = new List<PlayerResult>();
 const int TopKeep = 40;
 var gate = new object();
@@ -188,7 +189,7 @@ if (csvPath is not null)
     // (resume granularity is a whole demo anyway), thousands of times fewer syscalls.
     csv = new StreamWriter(csvPath, append: true) { AutoFlush = false };
     // aliveMinutes is the exposure: without it you cannot compute a rate or a Poisson baseline.
-    if (fresh) csv.WriteLine("demo,steamId,name,peakScore,aliveMinutes,wallhackTrack,aimbotSweep,triggerbot,shots,hits,headshots,unseenSamples,unseenNow,unseenPast,kills,killWall,killStill,killOnTgt,recoilSprays,recoilConsist,recoilPull,recoilRatio");
+    if (fresh) csv.WriteLine("demo,steamId,name,peakScore,aliveMinutes,wallhackTrack,aimbotSweep,triggerbot,shots,hits,headshots,unseenSamples,unseenNow,unseenPast,kills,killWall,killStill,killOnTgt,recoilSprays,recoilConsist,recoilPull,recoilRatio,revisits");
     csv.Flush();
 }
 
@@ -219,6 +220,9 @@ await Parallel.ForEachAsync(demoFiles, new ParallelOptions { MaxDegreeOfParallel
                     // was actually compensated) — a tapper never reaches this, so it can't be flagged.
                     if (r.RecoilSprays >= 4 && r.RecoilRatio >= 0f && r.RecoilPull >= 2f)
                         recoilResults.Add((r.Name, r.SteamId, r.RecoilConsist, r.RecoilPull, r.RecoilRatio, r.RecoilSprays, Path.GetFileName(r.Demo)));
+                foreach (var r in results)
+                    if (r.Revisits > 0 && r.AliveMinutes >= 1f)
+                        revisitResults.Add((r.Name, r.SteamId, r.Revisits, r.Revisits / r.AliveMinutes, r.AliveMinutes, Path.GetFileName(r.Demo)));
                 topResults.AddRange(results);
                 if (topResults.Count > TopKeep * 4)
                 {
@@ -312,6 +316,25 @@ if (recoilResults.Count > 0)
         Console.WriteLine($"  {r.ratio,5:F2}  {r.spread,5:F2}deg  {r.pull,6:F2}deg  {r.sprays,3}  {r.name,-24} {r.id,-18} [{r.demo}]");
 }
 
+// wallhack.revisit: THE first question (the gaze lesson) — does the double-peek fire on ~everyone, or
+// is it rare? If most legit sessions have revisits, the raw signature is too loose and needs the
+// off-angle/baseline gate before it means anything. Rate per alive-minute, since count = playtime.
+{
+    int total = allScores.Count, withR = revisitResults.Count;
+    Console.WriteLine($"\n=== wallhack.revisit (double-peek): {withR}/{total} sessions had >=1 revisit " +
+                      $"({100.0 * withR / Math.Max(1, total):F1}%) ===");
+    if (revisitResults.Count > 0)
+    {
+        var rr = revisitResults.Select(r => r.rate).OrderBy(x => x).ToList();
+        Console.Write("  revisits/alive-min (of those with >=1):");
+        foreach (var q in new[] { 0.5, 0.9, 0.99, 1.0 })
+            Console.Write($"  p{q * 100:0}={rr[Math.Min(rr.Count - 1, (int)(q * (rr.Count - 1)))]:F2}");
+        Console.WriteLine("\n  highest revisit rate (>=1 alive-min):");
+        foreach (var r in revisitResults.OrderByDescending(r => r.rate).Take(15))
+            Console.WriteLine($"    {r.rate,5:F2}/min  {r.count,3}x  {r.mins,5:F1}min  {r.name,-24} {r.id,-18} [{r.demo}]");
+    }
+}
+
 return 0;
 
 // One line that rewrites itself, rather than 17k lines of scrollback.
@@ -343,7 +366,8 @@ static string CsvRow(PlayerResult r) =>
     $"{r.Kills},{r.KillWall.ToString("F5", CultureInfo.InvariantCulture)}," +
     $"{r.KillStill.ToString("F1", CultureInfo.InvariantCulture)},{r.KillOnTgt.ToString("F2", CultureInfo.InvariantCulture)}," +
     $"{r.RecoilSprays},{r.RecoilConsist.ToString("F3", CultureInfo.InvariantCulture)}," +
-    $"{r.RecoilPull.ToString("F3", CultureInfo.InvariantCulture)},{r.RecoilRatio.ToString("F3", CultureInfo.InvariantCulture)}";
+    $"{r.RecoilPull.ToString("F3", CultureInfo.InvariantCulture)},{r.RecoilRatio.ToString("F3", CultureInfo.InvariantCulture)}," +
+    $"{r.Revisits}";
 
 static string Csv(string s) => s.Contains(',') || s.Contains('"') ? $"\"{s.Replace("\"", "\"\"")}\"" : s;
 
@@ -438,6 +462,19 @@ static async Task<(List<PlayerResult> players, List<ShotRow> shots)> ReplayOne(s
     const float SprayGapSeconds = 0.13f;
     const int MinSprayShots = 6;
     const int RecoilCurveLen = 8;
+
+    // wallhack.revisit (the double-peek): per (observer, unspotted enemy), a small state machine that
+    // fires when the aim goes ON-target -> OFF -> ON-target again within a window while the enemy stays
+    // UNSPOTTED and STILL. A single pre-aim is just a held angle (exculpatory); the REVISIT onto an
+    // unseen, stationary enemy is what game sense cannot explain. Raw count for now — off-angle/baseline
+    // gate comes later IF this fires on everyone (like gaze did). phase: 0 seeking, 1 on-target, 2 left.
+    var revisitState = new Dictionary<(int obs, int enemy), (int phase, float tOn1, Vector3 pos, int dwell)>();
+    var revisitCount = new Dictionary<int, int>();
+    const float RevisitOnDeg = 5f;      // "on target" cone
+    const float RevisitOffDeg = 20f;    // must clearly leave (the glance away), not just drift
+    const float RevisitWindow = 3f;     // the whole on->off->on happened in ~1.5-3s
+    const float RevisitStillUnits = 40f; // enemy must stay put — the double-peek is on a stationary target
+    const int RevisitDwellPolls = 3;    // must PARK on the enemy (~0.15s), not sweep through the cone
 
     void FlushSpray(int s)
     {
@@ -760,6 +797,35 @@ static async Task<(List<PlayerResult> players, List<ShotRow> shots)> ReplayOne(s
                 float err = Geometry.NearestBodyAimError(eye, angles, feet);
                 float bearingYaw = MathF.Atan2(feet.Y - eye.Y, feet.X - eye.X) * (180f / MathF.PI);
 
+                // wallhack.revisit: advance the on->off->on state machine for this unspotted enemy.
+                {
+                    var rk = (slot, enemyId);
+                    var rs = revisitState.GetValueOrDefault(rk);
+                    // Age out, or reset if the enemy moved — the double-peek is on a STILL target.
+                    if (rs.phase != 0 && (now - rs.tOn1 > RevisitWindow ||
+                                          Vector3.Distance(feet, rs.pos) > RevisitStillUnits))
+                        rs = default;
+                    bool onT = err < RevisitOnDeg;
+                    if (rs.phase == 0)
+                    {
+                        // Accumulate a DWELL: the crosshair must REST on the hidden enemy, not sweep past.
+                        if (onT) { int d = rs.dwell + 1; rs = (d >= RevisitDwellPolls ? 1 : 0, rs.dwell == 0 ? now : rs.tOn1, rs.dwell == 0 ? feet : rs.pos, d); }
+                        else rs = default;
+                    }
+                    else if (rs.phase == 1) { if (err > RevisitOffDeg) rs = (2, rs.tOn1, rs.pos, 0); }  // glanced away
+                    else // phase 2: is the aim RETURNING to park on the same unseen point?
+                    {
+                        if (onT)
+                        {
+                            int d = rs.dwell + 1;
+                            if (d >= RevisitDwellPolls) { revisitCount[slot] = revisitCount.GetValueOrDefault(slot) + 1; rs = (1, now, feet, 0); }
+                            else rs = (2, rs.tOn1, rs.pos, d);
+                        }
+                        else rs = (2, rs.tOn1, rs.pos, 0);
+                    }
+                    revisitState[rk] = rs;
+                }
+
                 // THE NULL TEST. Every metric built here so far asks how GOOD a player is, and a
                 // cheat with aim assist just makes someone statistically excellent - which is what
                 // it is sold to do. So levels overlap, the six measured all landed at 1.2-1.8x,
@@ -907,6 +973,7 @@ static async Task<(List<PlayerResult> players, List<ShotRow> shots)> ReplayOne(s
         recoilConsist.GetValueOrDefault(kv.Key, -1f),
         recoilPull.GetValueOrDefault(kv.Key, -1f),
         recoilRatio.GetValueOrDefault(kv.Key, -1f),
+        revisitCount.GetValueOrDefault(kv.Key),
         signals.Where(s => s.Key.slot == kv.Key).ToDictionary(s => s.Key.detector, s => s.Value)))
         .ToList();
     return (playerRows, shots);
@@ -921,7 +988,8 @@ internal sealed record PlayerResult(
     int Shots, int Hits, int Headshots,
     int UnseenSamples, int UnseenNow, int UnseenPast,
     int Kills, float KillWall, float KillStill, float KillOnTgt,
-    int RecoilSprays, float RecoilConsist, float RecoilPull, float RecoilRatio, Dictionary<string, int> Signals)
+    int RecoilSprays, float RecoilConsist, float RecoilPull, float RecoilRatio,
+    int Revisits, Dictionary<string, int> Signals)
 {
     public string Detail =>
         Signals.Count > 0 ? string.Join(", ", Signals.Select(kv => $"{kv.Key}×{kv.Value}")) : "no signals";
