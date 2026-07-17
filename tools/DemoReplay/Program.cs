@@ -323,8 +323,8 @@ if (recoilResults.Count > 0)
 // off-angle/baseline gate before it means anything. Rate per alive-minute, since count = playtime.
 {
     int total = allScores.Count, withR = revisitResults.Count;
-    Console.WriteLine($"\n=== wallhack.revisit (double-peek): {withR}/{total} sessions had >=1 revisit " +
-                      $"({100.0 * withR / Math.Max(1, total):F1}%) ===");
+    Console.WriteLine($"\n=== wallhack.revisit (clutch double-peek, <=2 enemies alive): " +
+                      $"{withR}/{total} sessions had >=1 ({100.0 * withR / Math.Max(1, total):F1}%) ===");
     if (revisitResults.Count > 0)
     {
         var rr = revisitResults.Select(r => r.rate).OrderBy(x => x).ToList();
@@ -478,6 +478,9 @@ static async Task<(List<PlayerResult> players, List<ShotRow> shots)> ReplayOne(s
     const float RevisitStillUnits = 40f; // enemy must stay put — the double-peek is on a stationary target
     const int RevisitDwellPolls = 20;   // must PARK on the unseen enemy for ~1s BOTH times — deliberate,
                                         // not a sweep/cluster. This is the whole "specific enough" fix.
+    const int RevisitMaxEnemiesAlive = 2; // CLUTCH gate: only in 1vX/2vX. With 10 enemies behind walls
+                                          // "aim at an unseen enemy" is trivial geometry; with 1-2 left
+                                          // there is no team spread to explain a precise double-park.
 
     void FlushSpray(int s)
     {
@@ -781,6 +784,12 @@ static async Task<(List<PlayerResult> players, List<ShotRow> shots)> ReplayOne(s
             WallhackGazeDetector.GazeSample? bestGaze = null;
             float bestGazeErr = 25f;
 
+            // Clutch gate for wallhack.revisit: how many enemies are still alive right now. A precise
+            // double-park is only telling when there are few enemies to coincidentally cover.
+            int aliveEnemies = players.Count(e => !ReferenceEquals(e, observer) && e.PawnIsAlive &&
+                e.CSTeamNum != team &&
+                (e.CSTeamNum == CSTeamNumber.Terrorist || e.CSTeamNum == CSTeamNumber.CounterTerrorist));
+
             foreach (var enemy in players)
             {
                 if (ReferenceEquals(enemy, observer) || !enemy.PawnIsAlive) continue;
@@ -800,7 +809,10 @@ static async Task<(List<PlayerResult> players, List<ShotRow> shots)> ReplayOne(s
                 float err = Geometry.NearestBodyAimError(eye, angles, feet);
                 float bearingYaw = MathF.Atan2(feet.Y - eye.Y, feet.X - eye.X) * (180f / MathF.PI);
 
-                // wallhack.revisit: advance the on->off->on state machine for this unspotted enemy.
+                // wallhack.revisit: advance the on->off->on state machine, but ONLY in a clutch
+                // (few enemies alive) — that is where a precise double-park stops being explainable
+                // by "the enemy team happened to be behind this wall".
+                if (aliveEnemies <= RevisitMaxEnemiesAlive)
                 {
                     var rk = (slot, enemyId);
                     var rs = revisitState.GetValueOrDefault(rk);
