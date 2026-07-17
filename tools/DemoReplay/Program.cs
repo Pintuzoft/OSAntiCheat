@@ -171,7 +171,7 @@ Console.WriteLine($"Replaying {demoFiles.Count} demo(s), poll {pollInterval * 10
 // the percentiles and a bounded top list; drop the rest.
 var allScores = new List<float>();
 var recoilResults = new List<(string name, ulong id, float spread, float pull, float ratio, int sprays, string demo)>();
-var revisitResults = new List<(string name, ulong id, int count, float rate, float mins, string demo)>();
+var revisitResults = new List<(string name, ulong id, int count, int depth, float mins, string demo)>();
 var topResults = new List<PlayerResult>();
 const int TopKeep = 40;
 var gate = new object();
@@ -191,7 +191,7 @@ if (csvPath is not null)
     // (resume granularity is a whole demo anyway), thousands of times fewer syscalls.
     csv = new StreamWriter(csvPath, append: true) { AutoFlush = false };
     // aliveMinutes is the exposure: without it you cannot compute a rate or a Poisson baseline.
-    if (fresh) csv.WriteLine("demo,steamId,name,peakScore,aliveMinutes,wallhackTrack,aimbotSweep,triggerbot,shots,hits,headshots,unseenSamples,unseenNow,unseenPast,kills,killWall,killStill,killOnTgt,recoilSprays,recoilConsist,recoilPull,recoilRatio,revisits");
+    if (fresh) csv.WriteLine("demo,steamId,name,peakScore,aliveMinutes,wallhackTrack,aimbotSweep,triggerbot,shots,hits,headshots,unseenSamples,unseenNow,unseenPast,kills,killWall,killStill,killOnTgt,recoilSprays,recoilConsist,recoilPull,recoilRatio,revisits,maxPeekDepth");
     csv.Flush();
 }
 
@@ -223,8 +223,8 @@ await Parallel.ForEachAsync(demoFiles, new ParallelOptions { MaxDegreeOfParallel
                     if (r.RecoilSprays >= 4 && r.RecoilRatio >= 0f && r.RecoilPull >= 2f)
                         recoilResults.Add((r.Name, r.SteamId, r.RecoilConsist, r.RecoilPull, r.RecoilRatio, r.RecoilSprays, Path.GetFileName(r.Demo)));
                 foreach (var r in results)
-                    if (r.Revisits > 0 && r.AliveMinutes >= 1f)
-                        revisitResults.Add((r.Name, r.SteamId, r.Revisits, r.Revisits / r.AliveMinutes, r.AliveMinutes, Path.GetFileName(r.Demo)));
+                    if (r.Revisits > 0)
+                        revisitResults.Add((r.Name, r.SteamId, r.Revisits, r.MaxPeekDepth, r.AliveMinutes, Path.GetFileName(r.Demo)));
                 topResults.AddRange(results);
                 if (topResults.Count > TopKeep * 4)
                 {
@@ -323,17 +323,15 @@ if (recoilResults.Count > 0)
 // off-angle/baseline gate before it means anything. Rate per alive-minute, since count = playtime.
 {
     int total = allScores.Count, withR = revisitResults.Count;
-    Console.WriteLine($"\n=== wallhack.revisit (clutch double-peek, <=2 enemies alive): " +
-                      $"{withR}/{total} sessions had >=1 ({100.0 * withR / Math.Max(1, total):F1}%) ===");
+    Console.WriteLine($"\n=== wallhack.revisit (clutch, SILENT enemy, ~1s park x2 on SAME enemy): " +
+                      $"{withR}/{total} sessions had a hit ({100.0 * withR / Math.Max(1, total):F2}%) ===");
     if (revisitResults.Count > 0)
     {
-        var rr = revisitResults.Select(r => r.rate).OrderBy(x => x).ToList();
-        Console.Write("  revisits/alive-min (of those with >=1):");
-        foreach (var q in new[] { 0.5, 0.9, 0.99, 1.0 })
-            Console.Write($"  p{q * 100:0}={rr[Math.Min(rr.Count - 1, (int)(q * (rr.Count - 1)))]:F2}");
-        Console.WriteLine("\n  highest revisit rate (>=1 alive-min):");
-        foreach (var r in revisitResults.OrderByDescending(r => r.rate).Take(15))
-            Console.WriteLine($"    {r.rate,5:F2}/min  {r.count,3}x  {r.mins,5:F1}min  {r.name,-24} {r.id,-18} [{r.demo}]");
+        int triples = revisitResults.Count(r => r.depth >= 3);
+        Console.WriteLine($"  depth>=3 (triple+ peek — a callout explains one position, not three): {triples} session(s)");
+        Console.WriteLine("  hardest hits (deepest peek on ONE silent unseen enemy first):");
+        foreach (var r in revisitResults.OrderByDescending(r => r.depth).ThenByDescending(r => r.count).Take(20))
+            Console.WriteLine($"    peek x{r.depth}  ({r.count} total)  {r.mins,5:F1}min  {r.name,-22} {r.id,-18} [{r.demo}]");
     }
 }
 
@@ -369,7 +367,7 @@ static string CsvRow(PlayerResult r) =>
     $"{r.KillStill.ToString("F1", CultureInfo.InvariantCulture)},{r.KillOnTgt.ToString("F2", CultureInfo.InvariantCulture)}," +
     $"{r.RecoilSprays},{r.RecoilConsist.ToString("F3", CultureInfo.InvariantCulture)}," +
     $"{r.RecoilPull.ToString("F3", CultureInfo.InvariantCulture)},{r.RecoilRatio.ToString("F3", CultureInfo.InvariantCulture)}," +
-    $"{r.Revisits}";
+    $"{r.Revisits},{r.MaxPeekDepth}";
 
 static string Csv(string s) => s.Contains(',') || s.Contains('"') ? $"\"{s.Replace("\"", "\"\"")}\"" : s;
 
@@ -470,17 +468,21 @@ static async Task<(List<PlayerResult> players, List<ShotRow> shots)> ReplayOne(s
     // UNSPOTTED and STILL. A single pre-aim is just a held angle (exculpatory); the REVISIT onto an
     // unseen, stationary enemy is what game sense cannot explain. Raw count for now — off-angle/baseline
     // gate comes later IF this fires on everyone (like gaze did). phase: 0 seeking, 1 on-target, 2 left.
-    var revisitState = new Dictionary<(int obs, int enemy), (int phase, float tOn1, Vector3 pos, int dwell)>();
+    var revisitState = new Dictionary<(int obs, int enemy), (int phase, float tOn1, Vector3 pos, int dwell, int depth)>();
     var revisitCount = new Dictionary<int, int>();
+    var maxDepth = new Dictionary<int, int>();  // deepest single-enemy peek sequence (2=double, 3=triple...)
     const float RevisitOnDeg = 5f;      // "on target" cone
     const float RevisitOffDeg = 20f;    // must clearly leave (the glance away), not just drift
     const float RevisitWindow = 6f;     // 1s park + a glance away + 1s park fits comfortably
-    const float RevisitStillUnits = 40f; // enemy must stay put — the double-peek is on a stationary target
     const int RevisitDwellPolls = 20;   // must PARK on the unseen enemy for ~1s BOTH times — deliberate,
                                         // not a sweep/cluster. This is the whole "specific enough" fix.
     const int RevisitMaxEnemiesAlive = 2; // CLUTCH gate: only in 1vX/2vX. With 10 enemies behind walls
                                           // "aim at an unseen enemy" is trivial geometry; with 1-2 left
                                           // there is no team spread to explain a precise double-park.
+    const float RevisitSilentSpeed = 140f; // AUDIBILITY gate: enemy speed (u/s) below which no footstep is
+                                           // heard — still OR sneaking. Above it the observer could have
+                                           // heard them, so it is not a "no information" case. Kills the
+                                           // game-sense-via-sound confound that a still-only gate missed.
 
     void FlushSpray(int s)
     {
@@ -809,42 +811,55 @@ static async Task<(List<PlayerResult> players, List<ShotRow> shots)> ReplayOne(s
                 float err = Geometry.NearestBodyAimError(eye, angles, feet);
                 float bearingYaw = MathF.Atan2(feet.Y - eye.Y, feet.X - eye.X) * (180f / MathF.PI);
 
-                // wallhack.revisit: advance the on->off->on state machine, but ONLY in a clutch
-                // (few enemies alive) — that is where a precise double-park stops being explainable
-                // by "the enemy team happened to be behind this wall".
+                // wallhack.revisit: in a clutch, does the observer PARK ~1s on a SILENT (still or
+                // sneaking) unseen enemy, glance away, and re-acquire the SAME enemy ~1s? No sound + no
+                // sight = no legitimate information; repeating it (depth: 2=double, 3=triple...) is the tell.
                 if (aliveEnemies <= RevisitMaxEnemiesAlive)
                 {
                     var rk = (slot, enemyId);
                     var rs = revisitState.GetValueOrDefault(rk);
-                    // Age out, or reset if the enemy moved — the double-peek is on a STILL target.
-                    if (rs.phase != 0 && (now - rs.tOn1 > RevisitWindow ||
-                                          Vector3.Distance(feet, rs.pos) > RevisitStillUnits))
-                        rs = default;
-                    bool onT = err < RevisitOnDeg;
-                    if (rs.phase == 0)
+
+                    // Enemy speed from its per-tick track: is it silent (still/sneaking) right now?
+                    float enemySpeed = 0f;
+                    if (trackers.TryGetValue(enemyId - 1, out var eTrk) && eTrk.Count >= 2)
                     {
-                        // Accumulate a DWELL: the crosshair must REST on the hidden enemy, not sweep past.
-                        if (onT) { int d = rs.dwell + 1; rs = (d >= RevisitDwellPolls ? 1 : 0, rs.dwell == 0 ? now : rs.tOn1, rs.dwell == 0 ? feet : rs.pos, d); }
-                        else rs = default;
+                        float dt2 = eTrk[0].Time - eTrk[1].Time;
+                        if (dt2 > 0f) enemySpeed = Vector3.Distance(eTrk[0].Origin, eTrk[1].Origin) / dt2;
                     }
-                    else if (rs.phase == 1) { if (err > RevisitOffDeg) rs = (2, rs.tOn1, rs.pos, 0); }  // glanced away
-                    else // phase 2: is the aim RETURNING to park on the same unseen point?
+
+                    // Audible (running), or aged out -> the "no information" premise breaks; reset.
+                    if (enemySpeed >= RevisitSilentSpeed || (rs.phase != 0 && now - rs.tOn1 > RevisitWindow))
+                        rs = default;
+
+                    if (enemySpeed < RevisitSilentSpeed)
                     {
-                        if (onT)
+                        bool onT = err < RevisitOnDeg;
+                        if (rs.phase == 0)
                         {
-                            int d = rs.dwell + 1;
-                            if (d >= RevisitDwellPolls)
-                            {
-                                revisitCount[slot] = revisitCount.GetValueOrDefault(slot) + 1;
-                                // Review mode: dump each episode so a human can jump straight to it in the demo.
-                                if (revisitTarget != 0 && steamIds.GetValueOrDefault(slot) == revisitTarget)
-                                    Console.WriteLine($"  [REVISIT] t={now,7:F1}s  tick={demo.CurrentDemoTick.Value,-8} " +
-                                        $"{names.GetValueOrDefault(slot, "?"),-18} -> unseen enemy @ ({feet.X:F0},{feet.Y:F0},{feet.Z:F0})  aimErr={err:F1}deg");
-                                rs = (1, now, feet, 0);
-                            }
-                            else rs = (2, rs.tOn1, rs.pos, d);
+                            // First park: crosshair must REST ~1s on the silent enemy, not sweep past.
+                            if (onT) { int d = rs.dwell + 1; bool ok = d >= RevisitDwellPolls; rs = (ok ? 1 : 0, rs.dwell == 0 ? now : rs.tOn1, rs.dwell == 0 ? feet : rs.pos, d, ok ? 1 : 0); }
+                            else rs = default;
                         }
-                        else rs = (2, rs.tOn1, rs.pos, 0);
+                        else if (rs.phase == 1) { if (err > RevisitOffDeg) rs = (2, rs.tOn1, rs.pos, 0, rs.depth); }  // glanced away
+                        else // phase 2: re-acquiring the SAME silent enemy?
+                        {
+                            if (onT)
+                            {
+                                int d = rs.dwell + 1;
+                                if (d >= RevisitDwellPolls)
+                                {
+                                    int depth = rs.depth + 1;   // 2 = double-peek, 3 = triple ...
+                                    revisitCount[slot] = revisitCount.GetValueOrDefault(slot) + 1;
+                                    if (depth > maxDepth.GetValueOrDefault(slot)) maxDepth[slot] = depth;
+                                    if (revisitTarget != 0 && steamIds.GetValueOrDefault(slot) == revisitTarget)
+                                        Console.WriteLine($"  [PEEK x{depth}] t={now,7:F1}s tick={demo.CurrentDemoTick.Value,-8} " +
+                                            $"{names.GetValueOrDefault(slot, "?"),-16} -> silent enemy @ ({feet.X:F0},{feet.Y:F0},{feet.Z:F0}) spd={enemySpeed:F0} err={err:F1}deg");
+                                    rs = (1, now, feet, 0, depth);
+                                }
+                                else rs = (2, rs.tOn1, rs.pos, d, rs.depth);
+                            }
+                            else rs = (2, rs.tOn1, rs.pos, 0, rs.depth);
+                        }
                     }
                     revisitState[rk] = rs;
                 }
@@ -997,6 +1012,7 @@ static async Task<(List<PlayerResult> players, List<ShotRow> shots)> ReplayOne(s
         recoilPull.GetValueOrDefault(kv.Key, -1f),
         recoilRatio.GetValueOrDefault(kv.Key, -1f),
         revisitCount.GetValueOrDefault(kv.Key),
+        maxDepth.GetValueOrDefault(kv.Key),
         signals.Where(s => s.Key.slot == kv.Key).ToDictionary(s => s.Key.detector, s => s.Value)))
         .ToList();
     return (playerRows, shots);
@@ -1012,7 +1028,7 @@ internal sealed record PlayerResult(
     int UnseenSamples, int UnseenNow, int UnseenPast,
     int Kills, float KillWall, float KillStill, float KillOnTgt,
     int RecoilSprays, float RecoilConsist, float RecoilPull, float RecoilRatio,
-    int Revisits, Dictionary<string, int> Signals)
+    int Revisits, int MaxPeekDepth, Dictionary<string, int> Signals)
 {
     public string Detail =>
         Signals.Count > 0 ? string.Join(", ", Signals.Select(kv => $"{kv.Key}×{kv.Value}")) : "no signals";
