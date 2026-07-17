@@ -168,6 +168,7 @@ Console.WriteLine($"Replaying {demoFiles.Count} demo(s), poll {pollInterval * 10
 // of 20 inflated demos is what drags a long run from 224/min down to 84/min. Keep the scores for
 // the percentiles and a bounded top list; drop the rest.
 var allScores = new List<float>();
+var recoilResults = new List<(string name, ulong id, float spread, float pull, float ratio, int sprays, string demo)>();
 var topResults = new List<PlayerResult>();
 const int TopKeep = 40;
 var gate = new object();
@@ -187,7 +188,7 @@ if (csvPath is not null)
     // (resume granularity is a whole demo anyway), thousands of times fewer syscalls.
     csv = new StreamWriter(csvPath, append: true) { AutoFlush = false };
     // aliveMinutes is the exposure: without it you cannot compute a rate or a Poisson baseline.
-    if (fresh) csv.WriteLine("demo,steamId,name,peakScore,aliveMinutes,wallhackTrack,aimbotSweep,triggerbot,shots,hits,headshots,unseenSamples,unseenNow,unseenPast,kills,killWall,killStill,killOnTgt");
+    if (fresh) csv.WriteLine("demo,steamId,name,peakScore,aliveMinutes,wallhackTrack,aimbotSweep,triggerbot,shots,hits,headshots,unseenSamples,unseenNow,unseenPast,kills,killWall,killStill,killOnTgt,recoilSprays,recoilConsist,recoilPull,recoilRatio");
     csv.Flush();
 }
 
@@ -213,6 +214,11 @@ await Parallel.ForEachAsync(demoFiles, new ParallelOptions { MaxDegreeOfParallel
             lock (gate)
             {
                 foreach (var r in results) allScores.Add(r.PeakScore);
+                foreach (var r in results)
+                    // Candidate gate: real sprays only. >=4 sprays AND pull >=2deg (accumulated recoil
+                    // was actually compensated) — a tapper never reaches this, so it can't be flagged.
+                    if (r.RecoilSprays >= 4 && r.RecoilRatio >= 0f && r.RecoilPull >= 2f)
+                        recoilResults.Add((r.Name, r.SteamId, r.RecoilConsist, r.RecoilPull, r.RecoilRatio, r.RecoilSprays, Path.GetFileName(r.Demo)));
                 topResults.AddRange(results);
                 if (topResults.Count > TopKeep * 4)
                 {
@@ -292,6 +298,20 @@ if (allScores.Count > 0)
         Console.WriteLine($"  {r.PeakScore,5:F2}  {r.Name,-24} {r.SteamId,-18} {r.Detail}  [{Path.GetFileName(r.Demo)}]");
 }
 
+// Recoil consistency (raw measurement): lowest cross-spray spread = most machine-like. On a legit
+// corpus this shows the HUMAN floor — how consistent the best sprayers actually get. A recoil script
+// should sit far below it. Require >=4 sprays so a lucky pair doesn't top the list.
+if (recoilResults.Count > 0)
+{
+    var rs = recoilResults.Select(r => r.ratio).OrderBy(x => x).ToList();
+    Console.WriteLine($"\nRecoil ratio (spread/pull; lower = more machine-like) over {recoilResults.Count} sessions (>=4 sprays):");
+    foreach (var q in new[] { 0.01, 0.05, 0.10, 0.50, 0.90 })
+        Console.WriteLine($"  p{q * 100,-4:0.#}: {rs[Math.Min(rs.Count - 1, (int)(q * (rs.Count - 1)))]:F2}");
+    Console.WriteLine($"\nMost machine-consistent recoil (lowest ratio first) — ratio | spread | pull | sprays:");
+    foreach (var r in recoilResults.OrderBy(r => r.ratio).Take(20))
+        Console.WriteLine($"  {r.ratio,5:F2}  {r.spread,5:F2}deg  {r.pull,6:F2}deg  {r.sprays,3}  {r.name,-24} {r.id,-18} [{r.demo}]");
+}
+
 return 0;
 
 // One line that rewrites itself, rather than 17k lines of scrollback.
@@ -321,7 +341,9 @@ static string CsvRow(PlayerResult r) =>
     $"{r.Signals.GetValueOrDefault("triggerbot")},{r.Shots},{r.Hits},{r.Headshots}," +
     $"{r.UnseenSamples},{r.UnseenNow},{r.UnseenPast}," +
     $"{r.Kills},{r.KillWall.ToString("F5", CultureInfo.InvariantCulture)}," +
-    $"{r.KillStill.ToString("F1", CultureInfo.InvariantCulture)},{r.KillOnTgt.ToString("F2", CultureInfo.InvariantCulture)}";
+    $"{r.KillStill.ToString("F1", CultureInfo.InvariantCulture)},{r.KillOnTgt.ToString("F2", CultureInfo.InvariantCulture)}," +
+    $"{r.RecoilSprays},{r.RecoilConsist.ToString("F3", CultureInfo.InvariantCulture)}," +
+    $"{r.RecoilPull.ToString("F3", CultureInfo.InvariantCulture)},{r.RecoilRatio.ToString("F3", CultureInfo.InvariantCulture)}";
 
 static string Csv(string s) => s.Contains(',') || s.Contains('"') ? $"\"{s.Replace("\"", "\"\"")}\"" : s;
 
@@ -397,6 +419,39 @@ static async Task<(List<PlayerResult> players, List<ShotRow> shots)> ReplayOne(s
     var lastFire = new Dictionary<int, float>();
     var prevShot = new Dictionary<int, (float time, int target, ViewAngles angles)>();
     var shots = new List<ShotRow>();
+
+    // Recoil-script signature (v0, raw measurement): an anti-recoil script's per-spray view-angle
+    // compensation curve is near-identical spray to spray; a human's pull-down varies. Group sprays
+    // by weapon (recoil is weapon-specific) and, per player, measure the cross-spray SPREAD of the
+    // compensation curve. Low spread = machine-consistent. NOTE: a PURE anti-recoil (player still aims
+    // manually) mixes script-recoil + human-aim, so aim variance inflates the spread on real demos;
+    // the clean test is a recoil script on bots (no aim) on a private server. Read it off the
+    // population like the other raw columns — do not threshold it blind.
+    var sprayWeapon = new Dictionary<int, string>();
+    var sprayLastFire = new Dictionary<int, float>();
+    var sprayCurve = new Dictionary<int, List<(float pitch, float yaw)>>();
+    var spraysByWeapon = new Dictionary<(int slot, string weapon), List<(float pitch, float yaw)[]>>();
+    // A real spray is CONTINUOUS auto fire at the weapon's cyclic rate (rifles ~0.09-0.10s/shot).
+    // Tapping is click-aim-click, >=0.2s apart. Chain shots only within ~0.13s (cyclic + tick jitter)
+    // so tapping physically cannot form a "spray" — the first, definitive tapping exclusion. The
+    // min-pull gate on the candidate list is the second: a tap accumulates no recoil to compensate.
+    const float SprayGapSeconds = 0.13f;
+    const int MinSprayShots = 6;
+    const int RecoilCurveLen = 8;
+
+    void FlushSpray(int s)
+    {
+        if (sprayCurve.TryGetValue(s, out var curve) && curve.Count >= MinSprayShots &&
+            sprayWeapon.TryGetValue(s, out var w))
+        {
+            var key = (s, w);
+            if (!spraysByWeapon.TryGetValue(key, out var list))
+                spraysByWeapon[key] = list = new List<(float, float)[]>();
+            list.Add(curve.ToArray());
+        }
+        sprayCurve.Remove(s);
+    }
+
     int sequence = 0;
     const float BurstWindowSeconds = 0.25f;
 
@@ -495,6 +550,18 @@ static async Task<(List<PlayerResult> players, List<ShotRow> shots)> ReplayOne(s
         int slot = (int)shooter.EntityIndex.Value - 1;
         shotCount[slot] = shotCount.GetValueOrDefault(slot) + 1;
         if (slot < 0 || !trackers.TryGetValue(slot, out var shooterTracker)) return;
+
+        // Recoil-consistency: fold this shot into the current weapon-specific spray. A new weapon or
+        // a gap > SprayGapSeconds closes the previous spray and starts a fresh one.
+        {
+            string weap = (e.Weapon ?? "").ToLowerInvariant();
+            float ts = Now();
+            bool cont = sprayLastFire.TryGetValue(slot, out var slf) && ts - slf < SprayGapSeconds &&
+                        sprayWeapon.GetValueOrDefault(slot) == weap;
+            if (!cont) { FlushSpray(slot); sprayWeapon[slot] = weap; sprayCurve[slot] = new List<(float pitch, float yaw)>(); }
+            sprayLastFire[slot] = ts;
+            if (shooterTracker.TryLatest(out var sa)) sprayCurve[slot].Add((sa.Angles.Pitch, sa.Angles.Yaw));
+        }
 
         var team = teams.GetValueOrDefault(slot);
         var enemies = trackers.Where(kv => kv.Key != slot &&
@@ -757,6 +824,69 @@ static async Task<(List<PlayerResult> players, List<ShotRow> shots)> ReplayOne(s
     var reader = DemoFileReader.Create(demo, input);
     await reader.ReadAllAsync();
 
+    // Close any spray still open at demo end.
+    foreach (var s in sprayCurve.Keys.ToList()) FlushSpray(s);
+
+    // Per-player recoil consistency: for each weapon with >=2 qualifying sprays, average the
+    // per-shot-index cross-spray SPREAD (deg) of the compensation curve (Δ from the spray's first
+    // shot; yaw unwrapped). Take the player's MOST consistent weapon (min spread) — a script is
+    // near-identical every spray, so its best weapon sits far below any human's. -1 = too few sprays.
+    var recoilConsist = new Dictionary<int, float>();   // raw cross-spray spread (deg) of the best weapon
+    var recoilPull = new Dictionary<int, float>();        // how far they actually compensated (deg) — the scale
+    var recoilRatio = new Dictionary<int, float>();       // spread / pull: a weak spray fakes a low absolute spread
+    var recoilSprays = new Dictionary<int, int>();
+    foreach (var g in spraysByWeapon.GroupBy(kv => kv.Key.slot))
+    {
+        int slot = g.Key;
+        int total = 0;
+        float bestRatio = float.NaN, bestSpread = 0f, bestPull = 0f;
+        foreach (var kv in g)
+        {
+            var sprays = kv.Value;
+            total += sprays.Count;
+            if (sprays.Count < 2) continue;
+            int L = Math.Min(RecoilCurveLen, sprays.Min(s => s.Length));
+            if (L < 2) continue;
+
+            // Δ-from-start curves, yaw unwrapped to [-180,180] so a spray that crosses ±180 is fine.
+            var curves = sprays.Select(s =>
+            {
+                var d = new (float p, float y)[L];
+                for (int k = 0; k < L; k++)
+                {
+                    float dp = s[k].pitch - s[0].pitch;
+                    float dy = s[k].yaw - s[0].yaw;
+                    dy -= 360f * MathF.Round(dy / 360f);
+                    d[k] = (dp, dy);
+                }
+                return d;
+            }).ToList();
+
+            float spreadSum = 0f, pullSum = 0f; int idxN = 0, nn = curves.Count;
+            for (int k = 1; k < L; k++)
+            {
+                float mp = 0f, my = 0f;
+                foreach (var c in curves) { mp += c[k].p; my += c[k].y; }
+                mp /= nn; my /= nn;
+                float v = 0f;
+                foreach (var c in curves) { float dp = c[k].p - mp, dy = c[k].y - my; v += dp * dp + dy * dy; }
+                spreadSum += MathF.Sqrt(v / nn);
+                pullSum += MathF.Sqrt(mp * mp + my * my);   // magnitude of the MEAN compensation at index k
+                idxN++;
+            }
+            if (idxN == 0) continue;
+            float spread = spreadSum / idxN;
+            float pull = pullSum / idxN;
+            // Normalise: a short/weak spray moves little, so a small ABSOLUTE spread means nothing.
+            // ratio = consistency RELATIVE to how much they actually compensated. Script -> tiny; a
+            // barely-sprayed human -> not tiny even if their absolute spread looks low.
+            float ratio = spread / MathF.Max(pull, 0.5f);
+            if (float.IsNaN(bestRatio) || ratio < bestRatio) { bestRatio = ratio; bestSpread = spread; bestPull = pull; }
+        }
+        recoilSprays[slot] = total;
+        if (!float.IsNaN(bestRatio)) { recoilConsist[slot] = bestSpread; recoilPull[slot] = bestPull; recoilRatio[slot] = bestRatio; }
+    }
+
     var playerRows = peakScore.Select(kv => new PlayerResult(
         file,
         steamIds.GetValueOrDefault(kv.Key),
@@ -773,6 +903,10 @@ static async Task<(List<PlayerResult> players, List<ShotRow> shots)> ReplayOne(s
         killCount.GetValueOrDefault(kv.Key) > 0 ? killWallSum.GetValueOrDefault(kv.Key) / killCount[kv.Key] : 0f,
         killCount.GetValueOrDefault(kv.Key) > 0 ? killStillSum.GetValueOrDefault(kv.Key) / killCount[kv.Key] : 0f,
         killCount.GetValueOrDefault(kv.Key) > 0 ? killOnTgtSum.GetValueOrDefault(kv.Key) / killCount[kv.Key] : 0f,
+        recoilSprays.GetValueOrDefault(kv.Key),
+        recoilConsist.GetValueOrDefault(kv.Key, -1f),
+        recoilPull.GetValueOrDefault(kv.Key, -1f),
+        recoilRatio.GetValueOrDefault(kv.Key, -1f),
         signals.Where(s => s.Key.slot == kv.Key).ToDictionary(s => s.Key.detector, s => s.Value)))
         .ToList();
     return (playerRows, shots);
@@ -786,7 +920,8 @@ internal sealed record PlayerResult(
     string Demo, ulong SteamId, string Name, float PeakScore, float AliveMinutes,
     int Shots, int Hits, int Headshots,
     int UnseenSamples, int UnseenNow, int UnseenPast,
-    int Kills, float KillWall, float KillStill, float KillOnTgt, Dictionary<string, int> Signals)
+    int Kills, float KillWall, float KillStill, float KillOnTgt,
+    int RecoilSprays, float RecoilConsist, float RecoilPull, float RecoilRatio, Dictionary<string, int> Signals)
 {
     public string Detail =>
         Signals.Count > 0 ? string.Join(", ", Signals.Select(kv => $"{kv.Key}×{kv.Value}")) : "no signals";

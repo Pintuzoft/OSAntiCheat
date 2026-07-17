@@ -27,6 +27,13 @@ for (int i = 1; i < args.Length; i++)
 if (key is null) { Console.Error.WriteLine("missing --key <steamApiKey>"); return 1; }
 if (!File.Exists(csvIn)) { Console.Error.WriteLine($"no such file: {csvIn}"); return 1; }
 
+// The recoil columns sit at the end of the replay schema and their position drifts as it grows,
+// so resolve them by header name rather than a fixed index.
+var header = SplitCsv(File.ReadLines(csvIn).FirstOrDefault() ?? "");
+int Col(string name) => header.FindIndex(h => h.Equals(name, StringComparison.OrdinalIgnoreCase));
+int cRatio = Col("recoilRatio"), cPull = Col("recoilPull"), cSprays = Col("recoilSprays");
+bool hasRecoil = cRatio >= 0 && cPull >= 0 && cSprays >= 0;
+
 // --- read baseline.csv: demo,steamId,name,peakScore,aliveMinutes,wallhackTrack,... ---
 // peakScore is the wrong yardstick: it accumulates, so it mostly ranks playtime. What was
 // actually validated against the three admin-banned cheaters is signals per alive-minute, so
@@ -34,6 +41,9 @@ if (!File.Exists(csvIn)) { Console.Error.WriteLine($"no such file: {csvIn}"); re
 var rows = new List<Row>();
 var totalSignals = new Dictionary<ulong, int>();
 var totalMinutes = new Dictionary<ulong, float>();
+// Per SteamID, one entry per qualifying real-spray session (pull>=2, sprays>=4). A recoil script
+// is consistently low across sessions, so we pool per player and take the median.
+var recoilSessions = new Dictionary<ulong, List<float>>();
 foreach (var line in File.ReadLines(csvIn).Skip(1))
 {
     var f = SplitCsv(line);
@@ -48,6 +58,17 @@ foreach (var line in File.ReadLines(csvIn).Skip(1))
             totalMinutes[sid] = totalMinutes.GetValueOrDefault(sid) + mins;
         if (int.TryParse(f[5], out var sig))
             totalSignals[sid] = totalSignals.GetValueOrDefault(sid) + sig;
+    }
+
+    // Recoil: keep only qualifying REAL sprays (tapping already excluded upstream by cadence).
+    if (hasRecoil && f.Count > Math.Max(cRatio, Math.Max(cPull, cSprays)) &&
+        float.TryParse(f[cRatio], NumberStyles.Float, CultureInfo.InvariantCulture, out var rr) &&
+        float.TryParse(f[cPull], NumberStyles.Float, CultureInfo.InvariantCulture, out var rp) &&
+        int.TryParse(f[cSprays], out var rsp) &&
+        rr >= 0f && rp >= 2f && rsp >= 4)
+    {
+        if (!recoilSessions.TryGetValue(sid, out var l)) recoilSessions[sid] = l = new List<float>();
+        l.Add(rr);
     }
 }
 
@@ -163,6 +184,58 @@ Console.WriteLine("""
       * What matters is separation: if banned players score no higher than everyone else,
         the detector is not measuring cheating.
     """);
+
+// --- recoil-consistency vs bans: the non-circular validator for the recoil-script metric ---
+if (hasRecoil && recoilSessions.Count > 0)
+{
+    static float Median(List<float> xs)
+    {
+        if (xs.Count == 0) return float.NaN;
+        var s = xs.OrderBy(x => x).ToList();
+        return s[s.Count / 2];
+    }
+
+    // One number per player: median recoil ratio over >=2 qualifying sessions. A script is low in
+    // EVERY session; a single low session is noise (a legit regular's own ratio swings a lot), so
+    // require two and take the median rather than the min.
+    var playerRatio = new Dictionary<ulong, (float median, int sessions)>();
+    foreach (var (sid, ratios) in recoilSessions)
+        if (ratios.Count >= 2)
+            playerRatio[sid] = (Median(ratios), ratios.Count);
+
+    var bannedR = new List<float>();
+    var cleanR = new List<float>();
+    foreach (var (sid, pr) in playerRatio)
+    {
+        var b = bans.GetValueOrDefault(sid);
+        (b is not null && (b.VacBanned || b.GameBans > 0) ? bannedR : cleanR).Add(pr.median);
+    }
+
+    void RDist(string label, List<float> set)
+    {
+        if (set.Count == 0) { Console.WriteLine($"  {label,-22}: (none)"); return; }
+        var s = set.OrderBy(x => x).ToList();
+        string Q(double q) => s[Math.Min(s.Count - 1, (int)(q * (s.Count - 1)))].ToString("F2");
+        Console.WriteLine($"  {label,-22} n={set.Count,-4} min={s[0]:F2}  p10={Q(0.1)}  median={Q(0.5)}");
+    }
+
+    Console.WriteLine($"\n=== Recoil ratio per player (median over >=2 real-spray sessions; LOWER = more machine-like) ===");
+    Console.WriteLine($"  {playerRatio.Count} players with >=2 qualifying sessions");
+    RDist("banned", bannedR);
+    RDist("no ban on record", cleanR);
+    Console.WriteLine("  -> if 'banned' sits BELOW 'no ban', the recoil metric separates machine from human.");
+    Console.WriteLine("     A low ratio is still only a SUSPECT until a human reviews the demo.");
+
+    Console.WriteLine($"\n=== Lowest recoil ratio (most machine-like) — ratio | sessions | ban ===");
+    foreach (var (sid, pr) in playerRatio.OrderBy(kv => kv.Value.median).Take(30))
+    {
+        var b = bans.GetValueOrDefault(sid);
+        string ban = b is not null && (b.VacBanned || b.GameBans > 0)
+            ? $"BANNED vac={b.VacBans} game={b.GameBans} d={b.DaysSinceLastBan}" : "no ban";
+        string name = byPlayer.TryGetValue(sid, out var row) ? row.Name : "?";
+        Console.WriteLine($"  {pr.median,5:F2}  {pr.sessions,2} sess  {name,-22} {sid}  {ban}");
+    }
+}
 
 if (outPath is not null)
 {
