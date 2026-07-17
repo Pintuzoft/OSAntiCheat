@@ -471,7 +471,9 @@ static async Task<(List<PlayerResult> players, List<ShotRow> shots)> ReplayOne(s
     var revisitState = new Dictionary<(int obs, int enemy), (int phase, float tOn1, Vector3 pos, int dwell, int depth)>();
     var revisitCount = new Dictionary<int, int>();
     var maxDepth = new Dictionary<int, int>();  // deepest single-enemy peek sequence (2=double, 3=triple...)
-    const float RevisitOnDeg = 5f;      // "on target" cone
+    const float RevisitOnDeg = 2.5f;    // tight LOCK cone: the aim must sit precisely on the body for
+                                        // ~1s = a genuine STOP, not a slow pan that grazes a 5deg cone.
+                                        // A pan fast enough to be a pan can't hold 2.5deg for a full second.
     const float RevisitOffDeg = 20f;    // must clearly leave (the glance away), not just drift
     const float RevisitWindow = 4f;     // FAST: 1s park + a quick glance (<=2s) + 1s re-park. A real
                                         // wallhack check is rapid; a slow "happened to look back" is not it.
