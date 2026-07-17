@@ -474,9 +474,10 @@ static async Task<(List<PlayerResult> players, List<ShotRow> shots)> ReplayOne(s
     var revisitCount = new Dictionary<int, int>();
     const float RevisitOnDeg = 5f;      // "on target" cone
     const float RevisitOffDeg = 20f;    // must clearly leave (the glance away), not just drift
-    const float RevisitWindow = 3f;     // the whole on->off->on happened in ~1.5-3s
+    const float RevisitWindow = 6f;     // 1s park + a glance away + 1s park fits comfortably
     const float RevisitStillUnits = 40f; // enemy must stay put — the double-peek is on a stationary target
-    const int RevisitDwellPolls = 3;    // must PARK on the enemy (~0.15s), not sweep through the cone
+    const int RevisitDwellPolls = 20;   // must PARK on the unseen enemy for ~1s BOTH times — deliberate,
+                                        // not a sweep/cluster. This is the whole "specific enough" fix.
 
     void FlushSpray(int s)
     {
