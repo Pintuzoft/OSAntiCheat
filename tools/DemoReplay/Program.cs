@@ -473,7 +473,8 @@ static async Task<(List<PlayerResult> players, List<ShotRow> shots)> ReplayOne(s
     var maxDepth = new Dictionary<int, int>();  // deepest single-enemy peek sequence (2=double, 3=triple...)
     const float RevisitOnDeg = 5f;      // "on target" cone
     const float RevisitOffDeg = 20f;    // must clearly leave (the glance away), not just drift
-    const float RevisitWindow = 6f;     // 1s park + a glance away + 1s park fits comfortably
+    const float RevisitWindow = 4f;     // FAST: 1s park + a quick glance (<=2s) + 1s re-park. A real
+                                        // wallhack check is rapid; a slow "happened to look back" is not it.
     const int RevisitDwellPolls = 20;   // must PARK on the unseen enemy for ~1s BOTH times — deliberate,
                                         // not a sweep/cluster. This is the whole "specific enough" fix.
     const int RevisitMaxEnemiesAlive = 2; // CLUTCH gate: only in 1vX/2vX. With 10 enemies behind walls
