@@ -830,3 +830,37 @@ sigma=0(perfekt) 0.00 | 0.05->0.019 | 0.10->0.038 | 0.15->0.057(korsar) | 0.20->
 - **Bevis, inte anklagelse:** larmet bär klippet/siffrorna + legit-mönstret, inte en dom att bekräfta.
 - **Bara validerade axlar får en etikett.** Wallhack (nolltest) har förtjänat sin; anti-recoil förtjänar
   sin ENDAST under golvet ~0,04. Arkitekturen vet vilka axlar som fyrade → mappning axel→etikett naturlig.
+
+## ❌ wallhack.revisit (dubbelpeeken) testad → DÖD som auto-detektor — 2026-07-18
+
+Byggd i `DemoReplay` (per (observer, osedd fiende): on-target-dwell → off >20° → on igen inom 3s, still
+fiende), + `--revisit-detail <steamId>` som dumpar varje episod (tick+tid+fiende-pos) för granskning.
+
+**Iteration + real data (4776 demos):**
+- Rå kon-korsning fyrade på **89%** av sessionerna (gaze-problemet). Dwell-krav (parkera ~0,15s, inte
+  svepa) → **44%**. Fortfarande på nästan hälften → för löst för en sällsynt cheat.
+- Topp-rate = kort-session-inflation + skickliga regulars (samma namn som wallhack.track/recoil).
+
+**Manuell granskning av topp-kandidaten (5,44/min, 2-min-session) — användaren tittade på demon:** FALSE
+POSITIVE, väl diagnosticerad. 9 av 11 revisits var EN ~1,2s klung-situation (crosshair sveper en grupp
+osedda fiender → detektorn dubbelräknar per fiende-par). Den isolerade "0,6°-låsningen" var: han stod
+still, förde siktet fram/tillbaka (kartkoll, ny på mappen), en fiende *gick in* i det stilla siktet.
+
+**Rotorsak (strukturell, inte en bugg):** på en rektangulär map med lagen på motsatta sidor står **hela
+fiende­laget bakom en vägg** i tittriktningen (~20 spelare = ~10 fiender bakom väggar). "Sikta nära osedd
+fiende" är då trivialt uppfyllt hela tiden → geometri × folkmängd ger 44% baslinje. Dwell/still räddar
+inte en *geometrisk* confound.
+
+**Varför nolltestet funkar men dubbelpeeken inte:** dubbelpeeken **saknar past-controlen.** Nolltestet
+jämför fiendens present- mot past-position; en legit spelare som håller väggen är på båda lika (game
+sense) → cancellerar, bara present-medan-osedd överlever. Dubbelpeeken räknar bara "siktade på osedd
+fiende två gånger" → geometrin gör det universellt. Samma röda tråd som dödade recoil-konsistens och
+timing: **det som separerar är kontrollen som cancellerar det legitima, inte signalen själv.**
+
+**Dom:** dubbelpeek-auto-detektorn hyllad. Konceptet (granskbart klipp) lever — men klippen ska komma
+från **nolltestets starkaste present-över-past-ögonblick** (ärver past-controlen), inte revisit. Ögat
+kan spotta en avsiktlig dubbelpeek; vår statistik fångade geometrin, inte avsikten.
+- [ ] Ev.: generera granskbara klipp ur nolltestets högsta present-over-past-ticks (tick+fiende-pos)
+      via samma `--*-detail`-mönster som revisit-dumpen — DET ärver past-controlen.
+- Detektor-lärdom att behålla: `wallhack.revisit` **dubbelräknar klungor** (per-par-fyrning). Om något
+  liknande byggs igen: deduplicera episoder i tid per observatör, inte per fiende-par.
