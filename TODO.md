@@ -221,10 +221,10 @@ på 90°+ / 62 ms. Jag påstod att stora vinklar var immuna mot artefakter — *
 - [ ] **Fix:** räkna bara målbyte när BÅDA skotten var *på* sina mål (aimErr < ~5°).
 
 ### ❌ Dwell (onTargetMs) — DÖD
-Med `--min-shots 50` såg listan lovande ut (`wolf_gbg` 94 ms / 27,7% mot referensens 375 ms / 6%).
+Med `--min-shots 50` såg listan lovande ut (`regular_A` 94 ms / 27,7% mot referensens 375 ms / 6%).
 Men listan sorterade i praktiken på **stickprovsstorlek** — alla i topplistan hade 55–330 skott.
 Med `--min-shots 2000`: hela spannet blir **234–375 ms** och referensspelaren hamnar mitt i klungan.
-Ingen separation. (`wolf_gbg` är gammal stammis som spelar sällan — 130 skott.)
+Ingen separation. (`regular_A` är gammal stammis som spelar sällan — 130 skott.)
 
 ### ❌ Peak score — mäter exponering
 Topp-20 är enbart de mest spelande stammisarna. Fuskarna låg på 0,72–0,75 = under populationens p99.
@@ -541,3 +541,242 @@ säker fuskare blev well-sampled; resten joinade sent (n=1 solid) + flera trasig
 - [ ] För riktig n: storskalig replay + `BanCheck` (Steam ban-API) för auto-etikettering — enda
       vägen förbi "fuskaren joinade sent och spelade 1 min"
 - [ ] Ev. dra tidigare demos för otypade Other-bans för att härda typningen
+
+## Prior-art-genomgång (2026-07-17): öppna trådar att gräva i
+
+Full granskningslogg av gamla anticheats i **[docs/prior-art.md](docs/prior-art.md)** (publik).
+De flesta gamla plugins bygger på Source 1:s usercmd-ström (per-command angles/buttons/mouse/
+tickcount) som CS2/CSSharp inte exponerar — så de flesta idéer är beundransvärda men oporterbara.
+Det som faktiskt är värt att jaga vidare, prioriterat:
+
+- [ ] ⭐ **Hallucination / phantom-entity — aktiv wallhack-DETEKTION.** Enda beteendemässiga
+      wallhack-*detektorn* i hela HL/Source-linjen (alla andra "anti-wallhack" är occlusion/culling).
+      Servern spawnar en fejk-fiende där bara ett fusk kan uppfatta den (i vägg/rök/ovanför) och
+      mäter om spelaren snappar/skjuter. *Aktiv* — skapar observationer i stället för att vänta,
+      angriper vårt n-problem direkt. **FEASIBILITY FÖRST:** kan CounterStrikeSharp injicera en
+      server-spårad entitet som är dold för legit sikt? + läs [Activisions writeup](https://www.activision.com/cdn/research/hallucinations)
+      och [arXiv 2409.14830](https://arxiv.org/pdf/2409.14830) för auktoritativ mekanik (CS 1.6-
+      originalen var delvis rekonstruerade). Arms-race-varning: sofistikerade cheats filtrerar phantoms.
+- [ ] ⛔ **ConVar-queries (från LAC/Lilac) — NEDGRADERAD, troligen inte värd det.** Idén: fråga
+      klientens graphics-cvars server-side (`r_drawothermodels`, `mat_wireframe` m.fl.). **Två
+      dödsstötar:** (1) *föråldrad attack* — de flesta cvarsen är `sv_cheats`-skyddade (gör inget på
+      en normal server), och moderna fusk rör inte cvars alls; de läser minne + ritar egen ESP-overlay.
+      (2) *trivialt spoofbar* — svaret kommer från klienten, ett hookande fusk returnerar rena default-
+      värden och "inget svar = skyldig" ger FP på legit klienter med nätstrul. Fångar bara den lataste
+      config-"cheat"-tiern. Behåll längst ner som ev. billig bottenskrap, men förvänta dig inget mot
+      riktiga hot.
+- [ ] 🟡 **Silent-aim via view-vs-shot-vinkel-mismatch (från StAC).** Skillnad mellan rapporterad
+      vy-vinkel och faktisk skott-vinkel = silent-aim. Signal vi INTE har. **FEASIBILITY:** ger CS2
+      oss båda vinklarna per skott?
+- [ ] 🟢 **Omöjliga vinkelgränser (från LAC): pitch >89° / roll >50°.** Nästan gratis, deterministiskt,
+      ingen legit klient sätter det. Lågt hängande — kan byggas oavsett de andra.
+- [ ] 🟢 **Spin sensitivity-gate (från SMAC).** Gata vår spinbot på `sensitivity ≤ 6` för att inte
+      fånga legit high-sens-flicks.
+- [ ] 🔵 **Distributions-baserad flaggning (från Oryx-AC).** Bygg per-spelar-*fördelningar* av ett mått
+      och flagga omänsklig *tighthet* i stället för att mönstermatcha en enskild händelse — närmast vår
+      egen ansats. Metodik att studera (de riktar mot rörelse/strafe, vi mot aim).
+- [ ] 🔎 **ReAimDetector (CS 1.6/ReAPI) — riktad gräv.** Server-side aim-snap, men inget auktoritativt
+      repo med dokumenterade heuristiker hittat än.
+- [ ] 🔎 **VACnet (Valve, GDC 2018) — conceptual read.** Valves egen server-side deep-learning-aimbot-
+      detektion på SAMMA sorts data som vi har. Closed source men metodiken är offentlig.
+- [ ] 📖 **Feature-mall (yviler/cs2-cheat-detection).** LSTM på .dem: pitch/yaw + 1a/2a/3e derivatan av
+      aim-vinkeln, kumulativ förflyttning, kill-fönster. + red-team-läsning ["Aim Low, Shoot High"](https://arxiv.org/abs/2004.12183)
+      för att veta vilka vinkel-heuristiker humaniserade aimbots slår.
+
+## ⭐ Detektor-koncept: `wallhack.revisit` (dubbelpeeken) — 2026-07-17
+
+**Ursprung:** ground-truth-observation från en demo-granskning på det gamla communityt (~18 år
+sedan, de_gambaru) som fortfarande är den mänskliga go-to-signaturen för att spotta en wallhacker.
+En still, dold fiende i ett hörn (unspotted, ingen LOS, inget ljud). Fuskaren i mitten:
+la siktet **rakt på den dolda kroppen genom väggen** → gled bort åt vänster (flank-koll) → la
+**tillbaka siktet exakt på honom igen** genom väggen → gick in efter. Ingen snap, inget skott
+genom vägg. Långsamt/medvetet, 1,5–3s.
+
+**Signaturen som ska detekteras:** vyn konvergerar på en still, osedd fiendes *faktiska* position →
+**lämnar** (vinkelfel växer, glansar bort) → **åter-konvergerar på samma position** — som en episod,
+medan fienden förblir unspotted hela tiden. Kärnan är **återbesöket**, inte en enda pre-aim.
+
+**Varför återbesöket bär signalen (= nolltestets logik som en episod, inte ett aggregat):**
+- EN crosshair-på-hörnet = håller en vinkel → oskyldigt, exculperande.
+- Lämna och **återvända precist till samma dolda punkt** går inte att förklara med "höll vinkeln"
+  (han lämnade den), och bara med game sense om punkten är *förutsägbar*. Off-angle hörn → ingen
+  laglig informationskälla → nästan omöjligt att attribuera till skicklighet.
+- Två oberoende on-target-händelser på en osedd, still, icke-uppenbart placerad fiende är
+  astronomiskt osannolikt av slump — mycket starkare än en enda pre-aim.
+
+**Fyller ett hål:** `gaze`/`track` kräver att fienden RÖR sig (vyn följer bäring) → fyrar inte på en
+still fiende. Dubbelpeeken fångar precis det fallet. Rimmar med XGuardian-fyndet "signaturen är
+STILLHET, inte tracking" + "still-aim × on-target", plus en temporal skärpning (återbesöket) som
+slår FP:n "skicklig regular pre-aimar en vanlig vinkel".
+
+**Annan sorts output = bevis en människa kan granska.** Nolltestet ger ett z-tal; dubbelpeeken ger
+ett *klipp* ("12:03 — sikte på dold kropp, blick bort, sikte tillbaka"). Guld för admin-review och
+en oberoende fusions-axel (still + episodisk + återbesök → korroborerar utan att överlappa våra andra).
+
+**FP-historia — vad som avgör om den fyrar rätt:**
+- ⚠️ **Off-angle vs vanlig hold-spot:** återvänder siktet dit fienden *faktiskt* är, vs dit spelare
+  *i allmänhet* pekar i området (populations-relativ baslinje — INTE hårdkodade spots). Off-angle +
+  återbesök = dödsstöt; vanlig pre-aim-spot = tvetydigt → måste hålla käft.
+- ⚠️ **Audibility/callouts:** stod han verkligen tyst? Nyss skjutit/sprungit, eller lagkamrat-callout
+  som gav positionen → exculperar (team-level-information, vår princip).
+
+**Mätning:** episod-detektor, inte per-tick-tröskel — mönstret "on-target → off-target → on-target
+på *samma* dolda punkt", inte bara lågt vinkelfel. Still-krav på fienden (låg velocity) + unspotted
+(SpottedByMask) hela fönstret + off-angle-gate mot baslinjen.
+
+- [ ] Retroaktivt testbart FÖRST i `DemoReplay` mot etiketterade fuskare — leta revisit-signaturen
+      i efterhand innan något byggs live.
+- [ ] Definiera on/off-target-trösklar (cone-radie) + återbesöks-fönster (~1,5–3s) + still-tröskel.
+- [ ] Off-angle-gate: krävs populations-baslinje för "vart pekar folk här" innan den kan skilja
+      återbesök-på-faktisk-position från återbesök-på-vanlig-spot.
+
+## ⭐ Detektor-koncept: soft-aim — 2026-07-17 (forsknings­förankrat)
+
+Soft-aim = "smooth aimbot": knuffar vyn mot fienden mjukt så det ser ut som spelaren rör siktet
+själv (key-triggat). Inställbar mjukhet + hur nära den landar. **Två användningsfall:**
+- *Kill/aggressivt* — knuffar mot fienden i en duell.
+- *Information* (proffs-skandalens variant, virus på mus/matchdatorer): knuffar mot **osedda**
+  fiender (bakom vägg/annan del av mappen); poängen är inte kill utan att spelaren *läser
+  riktningen på knuffen* → vet var fienden är. Det gör det till ett **wallhack-informationsläckage**,
+  inte ett aim-problem.
+
+### Rätt ram: jaga informationen / motionen, inte "mjukheten"
+
+Mjukheten är ratten fusket tunar för att se mänsklig ut → jaga inte den. Två oberoende axlar:
+
+**A) Informationskanal (för info-varianten) — samma som nolltestet.** Frågan är inte "hur bra
+aimen är" utan "**bär vyns riktning information om osedda fienders position den inte borde ha?**".
+Info-soft-aim behöver inte *landa* på fienden — den bara *biasar bäringen mot* den. Så en
+on-target-detektor missar den; en detektor på **bias-mot-bäring för *present* osedd position vs
+*past*** fångar knuffen. Subtil men *ihållande* → ackumuleras statistiskt (per-tick-statistik slår
+mänsklig granskning här — motsats till dubbelpeekens data-svält). Spotted-gate = FP-filtret
+(knuffar mot *synliga* fiender = bara aim-kvalitet, irrelevant).
+
+**B) Kinematik (för alla varianter) — "onaturlig jämnhet", INTE "konstant hastighet".**
+⚠️ **KORRIGERING av första gissningen (konstant-hastighets-platå):** research (2026-07-17) föll den
+som *specifik* signal av två skäl: (1) vanligaste soft-aimet = "flytta bråkdel av kvarvarande delta
+per tick" = exponentiell ease-out (EMA-lågpass) → **front-laddat, ingen platå**; platån finns bara i
+"clamped max turn-rate"-underfamiljen. (2) Människor **håller** nära-konstant hastighet vid *tracking*
+(smooth pursuit ~konstant-hastighets-servo; steering law) → rå platå-detektor falsklarmar på legit
+tracking av strafande fiende.
+Den robusta separatorn är **jämnhet/mikrostruktur:** människor kan inte röra sig långsamt-OCH-jämnt
+(Park & Hogan 2017, *"Moving slowly is hard for humans"* — under ~3s/cykel fragmenteras rörelsen i
+2–5 delrörelser); mänsklig rörelse bär alltid 2–10 Hz delrörelse-rippel + 8–12 Hz darrning. Tellen
+är **"för jämn, för repeterbar, rippel-frånvarande"**. Features: **SPARC / log-dimensionless-jerk** på
+hastighetsserien, frånvaro av 2–10 Hz-rippel, låg varians mellan engagemang.
+- **Amplitud-gate (användarens skärpning, håller):** *stor* jämn rörelse (45°+) är mycket mer omänsklig
+  än en liten — över 45° skulle en människa definitivt visa homing/korrigerings-struktur. Stor-OCH-jämn
+  > jämn ensam. OBS: 45°+ luktar *kill/aggressivt* soft-aim; info-varianten knuffar mindre.
+- **Flick-gate:** kör bara i flick-regimen, INTE under tracking (annars FP på smooth pursuit).
+- ⭐ **Self-normaliserad kontrast (kärnan):** poängsätt INTE svängens jämnhet mot en *global* tröskel
+  (varierar per spelare/hårdvara; humaniserat soft-aim tunar mot den). Poängsätt den mot **samma
+  spelares egen omgivande motorik, sekunder isär** — svängen är fällande för att den är omöjligt jämn
+  *relativt hur den handen jittrar strax efteråt*. Cancellerar skicklighet/hårdvara (samma trick som
+  nolltestets past-control) och är svårare att humanisera (att gömma svängen kräver att de mänskliga
+  delarna görs lika jämna → återinför detekterbarhet).
+
+### Incident-modell: maskin→människa→människa (episod, inte per-tick)
+
+En *soft-aim-incident* = en **episod** med formen `[omöjligt jämnt segment (maskin)]` → `[jitter:
+desorienterad människa söker sin sync, ~0,5–3s]` → `[muslyft/frys: om-centrering]` → synk igen.
+Kontrasten *mellan* delarna är beviset, inte någon del för sig. Episod-detektor (som `wallhack.revisit`).
+
+⚠️ **"Deterministiskt" gäller kausalkedjan (fysik), INTE manifestationen.** Lyftet kommer inte alltid
+(små desyncar absorberas i jittret); jitter-längden varierar; info-varianten svänger litet (ingen
+45°+ maskin-del); humaniserat smetar ut del 1. → **strukturell signatur poängsatt sannolikt**, aldrig
+krav på alla tre.
+
+**De 3 delarna är INTE 3 jämnstarka detektorer** — det är **1 bärande + 2 kontext:**
+- **Del 1 (maskin)** bär hela diskrimineringen (det enda en människa inte kan göra).
+- **Del 2 & 3 (människa)** är universella på egen hand (alla jittrar/fryser) → värde ENDAST som
+  kontrast till del 1 (self-normalisering ovan) + temporal korroboration.
+- ❌ **Hård AND** ("kräv maskin OCH jitter OCH frys") = SÄMRE: kostar recall (lyftet kommer inte alltid)
+  och de mänskliga delarna separerar inte på egen hand.
+- ✅ **Viktad fusion:** primär­axel = **self-normaliserad maskin-sväng** (bär signalen); jitter→frys-
+  diskontinuiteten + spotted-gate + nolltest = **korroborations-bonusar** i `SuspicionEngine` (finns →
+  höj konfidens; saknas → straffa inte).
+- 🔒 **Ankaret:** bevisa att del 1 (self-normaliserad jämnhets-sväng) separerar fuskare från bästa
+  legit-regulars i `DemoReplay` FÖRST. Jitter→frys-kontrasten testas som *tillägg* först därefter.
+
+### Feasibility & caveats
+
+- ✅ **Datan finns redan:** vi samplar pitch/yaw per tick (`TickSample`) → hastighets/accel-serien är
+  rekonstruerbar; retroaktivt testbar i `DemoReplay`. Inte data-blockerad (till skillnad från phantom/silent-aim).
+- ⚠️ **64-tick-verkligheten:** hastighet OK, acceleration marginellt (kräver Savitzky-Golay-utjämning),
+  **jerk opålitligt** (brus × ω³ + mikrostruktur nära/bortom 32 Hz Nyquist + vinkel-kvantisering).
+  128-tick ~fördubblar bandbredden, märkbart bättre. Behandla shape-features som grova ML-features (som
+  yviler), inte ren fysik. Sub-tick hjälper INTE (tidsstämplar skott, inte aim-vågformen).
+- ⚠️ **Rå vs kvantiserad vinkel:** verifiera att `pawn.EyeAngles` ger rå klient-vinkel (kvantiserad,
+  inte server-utjämnad) mot verklig demo innan vi litar på jämnhets-måttet.
+- ⚠️ **Humaniserings-kriget:** WindMouse (fysik + stokastisk vind + jitter, byggt för bot-undvikande) och
+  GAN-aimbots (["Aim Low, Shoot High"](https://arxiv.org/abs/2004.12183)) slår shape-detektorer. → höjer
+  *kostnaden* för evasion, inte oslagbart; hör hemma i ensemble.
+- 💡 **Underutforskat = möjlighet:** SPARC/jerk/jämnhet är moget i mus-biometri men knappt porterat till
+  FPS-anticheat på server-vinklar → genuint nytt, som nolltestet.
+
+- [ ] Testa jämnhets-features (SPARC / log-dim-jerk) retroaktivt i `DemoReplay`, flick-gated, mot
+      etiketterade fuskare + bästa legit-regulars innan något byggs live.
+- [ ] Verifiera rå-vs-kvantiserad `EyeAngles` mot en demo; mät om jämnhets-signalen överlever kvantiseringen.
+- [ ] Mät mänsklig baslinje: producerar legit-spelare någonsin rippel-fria segment? (populations-first).
+
+## ⭐ Delad primitiv: maskin-signatur / "motor-brus-frånvaro" över kanaler — 2026-07-17
+
+**Generaliseringen (användarens):** soft-aim-jämnheten är ett specialfall. Den egentliga primitiven är
+**"frånvaro av mänskligt motor-brus"** — och den dyker upp *överallt där kod styr en kanal i stället för
+en hand*. Människan har irreducibel varians (delrörelser, darr, spray-till-spray-skillnad); koden
+upprepar sig för exakt. Gemensam feature: **låg varians mellan instanser, self-normaliserat** (samma
+röda tråd som nolltestet — jämför spelaren med en kontroll som cancellerar skicklighet, nu på *motoriken*).
+
+**Kanaler den generaliserar över:**
+- **View** (aim) — soft-aim, recoil-script (nedan).
+- **Position** (strafe/bhop) — Oryx-AC gör redan detta ("för många perfekta strafes", varians ~0).
+- **Timing** (eld-intervall, autoshoot) — "för regelbundet".
+
+### ⭐ Starkaste + lättast-validerade tillämpning: recoil-control-script (testa FÖRE soft-aim)
+
+Ett recoil-script rör vyn i ett precist skriptat mot-mönster under spray för att kansellera rekylen.
+Bättre första mål än soft-aim av tre skäl:
+1. **Maskin-genererad view-rörelse** → har maskin-signaturen.
+2. **Extremt repeterbart** → self-normaliseringen blir kristallklar: människans rekylkontroll *varierar*
+   spray-till-spray; scriptets är **identiskt varje gång**. "Låg varians mellan sprayer" > absolut tröskel.
+3. **Sprayen segmenterar rörelsen GRATIS** — löser det svåra onset/offset-problemet (vi vet när spelaren
+   eldar); spray-fönstret *är* rörelsefönstret.
+
+### Varför generaliseringen är värdefull (inte bara fler idéer)
+
+Mät-infrastrukturen (jämnhets/varians-mått + baslinje offline i `DemoReplay`) är **delad, inte
+engångs**: samma maskineri som baseline:ar aim-jämnhet baseline:ar recoil-script-jämnhet och
+strafe-regelbundenhet. Investeringen i mät-lagret betalar sig över flera fusktyper → starkare case för
+att bygga det.
+
+**Ärliga gränser (samma som soft-aim):** familj/princip, inte en detektor — varje kanal behöver egen
+segmentering + baslinje + positiva prov; humaniserade script lägger till jitter → fångar naiva, inte
+bäst-tunade; 64-tick-brusgolvet gäller överallt.
+
+### Arkiv-mining som discovery (utökar n=3) — MEN cirkularitets-grinden är obligatorisk
+
+Samma offline-maskineri kan **skanna hela arkivet** (17k demos) efter maskin-rörelser → angriper
+n=3-problemet genom att *hitta* okända fuskare. ⚠️ **En detektion är en MISSTÄNKT, inte en bekräftad
+fuskare.** Att validera detektorn på de demos den själv pekade ut = **cirkulärt** (samma fälla som
+"sweeping configs mot få positiva hittar slump-vinnare"). Discovery får aldrig vara sin egen ground-truth.
+
+**Varje kandidat kräver *oberoende* bekräftelse innan den räknas som positiv:**
+- **Ban-listan** (`BanCheck` / `sa_bans`) — bannad oberoende av admins = riktig ground-truth.
+- **En oberoende axel** fyrar också (nolltest, hit%) — oberoende bevis, inte samma mätning två gånger.
+- **Manuell demo-granskning.**
+
+**Outlier-iteration:** arkivet innehåller fuskare → de kontaminerar baslinjen (svansen). Bygg baslinje →
+flagga svans-outliers → bygg om renare baslinje utan dem → upprepa.
+
+**Renaste positiva = kontrollerade testservern** (garanterad ground-truth), inte arkiv-fynden. Arkiv-
+discovery utökar verkliga positiva men alltid genom oberoende-grinden.
+
+**Pipeline:** skanna alla → kandidater → oberoende-bekräftelse-filter → bekräftad delmängd utökar
+etiketterad mängd → *sen* validera på held-out. Discovery matar etiketteringen, ersätter inte valideringen.
+
+- [ ] Testa recoil-script-signaturen (varians mellan sprayer, self-normaliserat) i `DemoReplay` FÖRE
+      soft-aim — sprayen ger segmenteringen gratis, "identisk mellan sprayer" är en tydligare tell.
+- [ ] Bygg jämnhets/varians-mät-lagret som en *delad* primitiv (återanvändbar över view/position/timing),
+      inte inbakat i en enda detektor.
+- [ ] Arkiv-mining: skanna alla demos → kandidater, men grinda på ban-lista/oberoende-axel/manuell
+      granskning innan något räknas som positiv. Aldrig cirkulär validering.

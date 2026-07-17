@@ -1,5 +1,22 @@
 # OSAntiCheat
 
+![status: experimental](https://img.shields.io/badge/status-experimental-orange)
+![phase: calibration & data-gen](https://img.shields.io/badge/phase-calibration%20%26%20data--gen-blue)
+![version](https://img.shields.io/badge/version-0.6.1-informational)
+![response: log--only](https://img.shields.io/badge/response-log--only-green)
+![license: MIT](https://img.shields.io/badge/license-MIT-lightgrey)
+
+> [!IMPORTANT]
+> **Early-stage research project — not production-ready.** OSAntiCheat is under active
+> development. Right now we are in a **calibration & data-generation phase**: detectors are being
+> tuned and validated against real server data, thresholds are *not* final, and detection axes
+> are still being added and reworked. Expect breaking changes between versions.
+>
+> Because it is statistical, it flags **probabilities, not proof**. The current response is
+> **log + admin notice only — it never auto-kicks or bans.** Do **not** deploy it as your sole
+> line of defense, and do not act punitively on its output yet. Follow along and star the repo
+> if you want to watch it mature. ⭐
+
 Server-side, heuristic anticheat for **CS2**, built as a
 [CounterStrikeSharp](https://docs.cssharp.dev/) plugin in C# (.NET 10).
 
@@ -8,9 +25,11 @@ Server-side, heuristic anticheat for **CS2**, built as a
 > flag *probabilities*, not proof — but it's impossible for a cheater to bypass by hiding
 > their client. The v1 response is **log + admin notice only**, never auto kick/ban.
 
-## Status (v1)
+## Detectors (implemented — under calibration)
 
-Working detectors, verified by unit tests against synthetic tick data:
+These detection axes are **built and pass unit tests against synthetic tick data**, but none are
+finalized: thresholds are still being tuned against real server data and any axis may be reworked
+or dropped. Treat the table as *what we're testing*, not *what is proven*.
 
 | Detector | Signal | Notes |
 |---|---|---|
@@ -84,6 +103,26 @@ CounterStrikeSharp API dll is host-provided and intentionally not shipped.
 Configuration (thresholds, detector toggles, log path) is generated on first load — see
 [OSAntiCheatConfig](src/Config/OSAntiCheatConfig.cs). The `css_osac_debug` in-game command
 dumps your latest tracked sample to verify the sampler on a live server.
+
+## Acknowledgments
+
+OSAntiCheat is server-side and statistical, but several detection *concepts* trace back to
+earlier open-source SourceMod anti-cheats. These projects are largely abandoned now; we build on
+their ideas and credit them where due:
+
+- **SMAC** — SourceMod Anti-Cheat — aim-snap-on-kill, spin yaw-velocity gating (with a
+  sensitivity exclusion to spare legit high-sens flicks).
+- **Little Anti-Cheat / Lilac** — impossible pitch/roll angle bounds, ConVar-query cheats,
+  NoLerp interp math.
+- **CoW Anti-Cheat** — event-timing checks (e.g. instant-defuse).
+
+Those are Source 1 and built on the per-command usercmd stream. OSAntiCheat reimplements the
+applicable ideas in C# from per-tick server state for CS2 / Source 2 — **concepts only, no code
+is copied.** Where a specific detector adapts an idea, it is cited inline at the detector.
+
+📖 **[docs/prior-art.md](docs/prior-art.md)** is our open review log of every anti-cheat (and
+academic project) we studied — what each detected, whether it's reproducible in a server-side
+statistical model, and an honest verdict on what we could take from it.
 
 ## License
 
