@@ -36,6 +36,7 @@ string? since = null, until = null;
 string? failLog = null;
 int limit = 0;   // sanity-check a sample before committing an hour to the whole archive
 int jobs = Math.Max(1, Environment.ProcessorCount - 2); // parsing is CPU-bound; leave a couple free
+ulong revisitTarget = 0; // --revisit-detail <steamId>: print each double-peek episode (tick+time+enemy) to review
 for (int i = 1; i < args.Length; i++)
 {
     if (args[i] == "--poll" && i + 1 < args.Length && float.TryParse(args[i + 1], NumberStyles.Float, CultureInfo.InvariantCulture, out var p))
@@ -47,6 +48,7 @@ for (int i = 1; i < args.Length; i++)
     if (args[i] == "--until" && i + 1 < args.Length) until = args[i + 1];
     if (args[i] == "--fail-log" && i + 1 < args.Length) failLog = args[i + 1];
     if (args[i] == "--limit" && i + 1 < args.Length && int.TryParse(args[i + 1], out var L)) limit = L;
+    if (args[i] == "--revisit-detail" && i + 1 < args.Length) ulong.TryParse(args[i + 1], out revisitTarget);
 }
 
 // Archives are stored gzipped (1.7 TB of them) — read .dem.gz directly rather than making
@@ -211,7 +213,7 @@ await Parallel.ForEachAsync(demoFiles, new ParallelOptions { MaxDegreeOfParallel
     {
         try
         {
-            var (results, shotRows) = await ReplayOne(file, pollInterval);
+            var (results, shotRows) = await ReplayOne(file, pollInterval, revisitTarget);
             lock (gate)
             {
                 foreach (var r in results) allScores.Add(r.PeakScore);
@@ -371,7 +373,7 @@ static string CsvRow(PlayerResult r) =>
 
 static string Csv(string s) => s.Contains(',') || s.Contains('"') ? $"\"{s.Replace("\"", "\"\"")}\"" : s;
 
-static async Task<(List<PlayerResult> players, List<ShotRow> shots)> ReplayOne(string file, float pollInterval)
+static async Task<(List<PlayerResult> players, List<ShotRow> shots)> ReplayOne(string file, float pollInterval, ulong revisitTarget)
 {
     var demo = new CsDemoParser();
 
@@ -818,7 +820,15 @@ static async Task<(List<PlayerResult> players, List<ShotRow> shots)> ReplayOne(s
                         if (onT)
                         {
                             int d = rs.dwell + 1;
-                            if (d >= RevisitDwellPolls) { revisitCount[slot] = revisitCount.GetValueOrDefault(slot) + 1; rs = (1, now, feet, 0); }
+                            if (d >= RevisitDwellPolls)
+                            {
+                                revisitCount[slot] = revisitCount.GetValueOrDefault(slot) + 1;
+                                // Review mode: dump each episode so a human can jump straight to it in the demo.
+                                if (revisitTarget != 0 && steamIds.GetValueOrDefault(slot) == revisitTarget)
+                                    Console.WriteLine($"  [REVISIT] t={now,7:F1}s  tick={demo.CurrentDemoTick.Value,-8} " +
+                                        $"{names.GetValueOrDefault(slot, "?"),-18} -> unseen enemy @ ({feet.X:F0},{feet.Y:F0},{feet.Z:F0})  aimErr={err:F1}deg");
+                                rs = (1, now, feet, 0);
+                            }
                             else rs = (2, rs.tOn1, rs.pos, d);
                         }
                         else rs = (2, rs.tOn1, rs.pos, 0);
