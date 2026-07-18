@@ -511,9 +511,14 @@ static async Task<(List<PlayerResult> players, List<ShotRow> shots)> ReplayOne(s
     var maxFollowMs = new Dictionary<int, float>();
     var maxFollowSweep = new Dictionary<int, float>();
     var maxFollowTick = new Dictionary<int, int>();
+    var followStartPos = new Dictionary<(int obs, int enemy), Vector3>();  // enemy pos at follow start (diagnostic)
     const float FollowCone = 5f;         // view must stay within this of the enemy
     const float FollowMoveSpeed = 60f;   // enemy must be MOVING (u/s), not a static hold
     const float FollowMinMs = 3000f;     // >=3s sustained to count
+    const float FollowMinDisplacement = 300f; // enemy must have actually GONE somewhere (net units) — a
+                                              // taser/eco standoff (both waiting either side of a wall) is
+                                              // near-stationary, and instantaneous speed false-positives on
+                                              // its tiny shifts. Net displacement kills that.
 
     void FlushSpray(int s)
     {
@@ -913,19 +918,20 @@ static async Task<(List<PlayerResult> players, List<ShotRow> shots)> ReplayOne(s
                     if (fs.start > 0f && (!onTgtMoving || !contiguous))   // the follow ended — record it
                     {
                         float dur = (fs.lastTime - fs.start) * 1000f;
-                        if (dur >= FollowMinMs && dur > maxFollowMs.GetValueOrDefault(slot))
+                        float disp = Vector3.Distance(feet, followStartPos.GetValueOrDefault(fk));   // net enemy movement
+                        if (dur >= FollowMinMs && disp >= FollowMinDisplacement && dur > maxFollowMs.GetValueOrDefault(slot))
                         {
                             maxFollowMs[slot] = dur; maxFollowSweep[slot] = fs.swept; maxFollowTick[slot] = fs.startTick;
                             if (revisitTarget != 0 && steamIds.GetValueOrDefault(slot) == revisitTarget)
                                 Console.WriteLine($"  [FOLLOW {dur / 1000f:F1}s] round {roundNumber}, {fs.start - roundStartTime:F0}s in  tick={fs.startTick,-8} " +
-                                    $"{names.GetValueOrDefault(slot, "?"),-16} tracked a MOVING unseen enemy — bearing swept {fs.swept:F0}deg");
+                                    $"{names.GetValueOrDefault(slot, "?"),-14} -> enemy '{names.GetValueOrDefault(enemyId - 1, "?")}' moved {disp:F0}u, bearing swept {fs.swept:F0}deg");
                         }
                         fs = default;
                     }
 
                     if (onTgtMoving)   // start a fresh follow or extend the current one
                     {
-                        if (fs.start == 0f) fs = (now, demo.CurrentDemoTick.Value, bearingYaw, 0f, now);
+                        if (fs.start == 0f) { fs = (now, demo.CurrentDemoTick.Value, bearingYaw, 0f, now); followStartPos[(slot, enemyId)] = feet; }
                         else { float db = bearingYaw - fs.lastBearing; db -= 360f * MathF.Round(db / 360f); fs = (fs.start, fs.startTick, bearingYaw, fs.swept + MathF.Abs(db), now); }
                     }
                     followState[fk] = fs;
