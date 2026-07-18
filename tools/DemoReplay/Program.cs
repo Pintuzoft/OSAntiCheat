@@ -507,7 +507,7 @@ static async Task<(List<PlayerResult> players, List<ShotRow> shots)> ReplayOne(s
     // (err < cone) for >=3s while the enemy MOVES (active tracking, not a static hold). Longer = more
     // certain. "swept" = bearing the view followed (a straight pre-aim sweeps little; following a turning
     // enemy sweeps a lot — the part pre-aim can't fake).
-    var followState = new Dictionary<(int obs, int enemy), (float start, int startTick, float lastBearing, float swept)>();
+    var followState = new Dictionary<(int obs, int enemy), (float start, int startTick, float lastBearing, float swept, float lastTime)>();
     var maxFollowMs = new Dictionary<int, float>();
     var maxFollowSweep = new Dictionary<int, float>();
     var maxFollowTick = new Dictionary<int, int>();
@@ -905,25 +905,28 @@ static async Task<(List<PlayerResult> players, List<ShotRow> shots)> ReplayOne(s
                     { float dtf = eTf[0].Time - eTf[1].Time; if (dtf > 0f) espeed = Vector3.Distance(eTf[0].Origin, eTf[1].Origin) / dtf; }
                     var fk = (slot, enemyId);
                     var fs = followState.GetValueOrDefault(fk);
-                    if (espeed > FollowMoveSpeed && err < FollowCone)
+                    bool onTgtMoving = espeed > FollowMoveSpeed && err < FollowCone;
+                    // Contiguous only if this pair was updated last poll — a gap means the enemy was
+                    // spotted/skipped/off-target in between, so the follow is NOT continuous.
+                    bool contiguous = fs.start > 0f && now - fs.lastTime <= pollInterval * 2f;
+
+                    if (fs.start > 0f && (!onTgtMoving || !contiguous))   // the follow ended — record it
                     {
-                        if (fs.start == 0f) fs = (now, demo.CurrentDemoTick.Value, bearingYaw, 0f);
-                        else { float db = bearingYaw - fs.lastBearing; db -= 360f * MathF.Round(db / 360f); fs = (fs.start, fs.startTick, bearingYaw, fs.swept + MathF.Abs(db)); }
-                    }
-                    else
-                    {
-                        if (fs.start > 0f)
+                        float dur = (fs.lastTime - fs.start) * 1000f;
+                        if (dur >= FollowMinMs && dur > maxFollowMs.GetValueOrDefault(slot))
                         {
-                            float dur = (now - fs.start) * 1000f;
-                            if (dur >= FollowMinMs && dur > maxFollowMs.GetValueOrDefault(slot))
-                            {
-                                maxFollowMs[slot] = dur; maxFollowSweep[slot] = fs.swept; maxFollowTick[slot] = fs.startTick;
-                                if (revisitTarget != 0 && steamIds.GetValueOrDefault(slot) == revisitTarget)
-                                    Console.WriteLine($"  [FOLLOW {dur / 1000f:F1}s] round {roundNumber}, {fs.start - roundStartTime:F0}s in  tick={fs.startTick,-8} " +
-                                        $"{names.GetValueOrDefault(slot, "?"),-16} tracked a MOVING unseen enemy — bearing swept {fs.swept:F0}deg");
-                            }
+                            maxFollowMs[slot] = dur; maxFollowSweep[slot] = fs.swept; maxFollowTick[slot] = fs.startTick;
+                            if (revisitTarget != 0 && steamIds.GetValueOrDefault(slot) == revisitTarget)
+                                Console.WriteLine($"  [FOLLOW {dur / 1000f:F1}s] round {roundNumber}, {fs.start - roundStartTime:F0}s in  tick={fs.startTick,-8} " +
+                                    $"{names.GetValueOrDefault(slot, "?"),-16} tracked a MOVING unseen enemy — bearing swept {fs.swept:F0}deg");
                         }
                         fs = default;
+                    }
+
+                    if (onTgtMoving)   // start a fresh follow or extend the current one
+                    {
+                        if (fs.start == 0f) fs = (now, demo.CurrentDemoTick.Value, bearingYaw, 0f, now);
+                        else { float db = bearingYaw - fs.lastBearing; db -= 360f * MathF.Round(db / 360f); fs = (fs.start, fs.startTick, bearingYaw, fs.swept + MathF.Abs(db), now); }
                     }
                     followState[fk] = fs;
                 }
