@@ -172,6 +172,7 @@ Console.WriteLine($"Replaying {demoFiles.Count} demo(s), poll {pollInterval * 10
 var allScores = new List<float>();
 var recoilResults = new List<(string name, ulong id, float spread, float pull, float ratio, int sprays, string demo)>();
 var revisitResults = new List<(string name, ulong id, int count, int depth, float mins, string demo)>();
+var followResults = new List<(string name, ulong id, float ms, float sweep, int tick, string demo)>();
 var topResults = new List<PlayerResult>();
 const int TopKeep = 40;
 var gate = new object();
@@ -191,7 +192,7 @@ if (csvPath is not null)
     // (resume granularity is a whole demo anyway), thousands of times fewer syscalls.
     csv = new StreamWriter(csvPath, append: true) { AutoFlush = false };
     // aliveMinutes is the exposure: without it you cannot compute a rate or a Poisson baseline.
-    if (fresh) csv.WriteLine("demo,steamId,name,peakScore,aliveMinutes,wallhackTrack,aimbotSweep,triggerbot,shots,hits,headshots,unseenSamples,unseenNow,unseenPast,kills,killWall,killStill,killOnTgt,recoilSprays,recoilConsist,recoilPull,recoilRatio,revisits,maxPeekDepth");
+    if (fresh) csv.WriteLine("demo,steamId,name,peakScore,aliveMinutes,wallhackTrack,aimbotSweep,triggerbot,shots,hits,headshots,unseenSamples,unseenNow,unseenPast,kills,killWall,killStill,killOnTgt,recoilSprays,recoilConsist,recoilPull,recoilRatio,revisits,maxPeekDepth,followMs,followSweep,followTick");
     csv.Flush();
 }
 
@@ -225,6 +226,9 @@ await Parallel.ForEachAsync(demoFiles, new ParallelOptions { MaxDegreeOfParallel
                 foreach (var r in results)
                     if (r.Revisits > 0)
                         revisitResults.Add((r.Name, r.SteamId, r.Revisits, r.MaxPeekDepth, r.AliveMinutes, Path.GetFileName(r.Demo)));
+                foreach (var r in results)
+                    if (r.FollowMs > 0)
+                        followResults.Add((r.Name, r.SteamId, r.FollowMs, r.FollowSweep, r.FollowTick, Path.GetFileName(r.Demo)));
                 topResults.AddRange(results);
                 if (topResults.Count > TopKeep * 4)
                 {
@@ -335,6 +339,17 @@ if (recoilResults.Count > 0)
     }
 }
 
+// wallhack.follow: longest sustained track of a MOVING unseen enemy. Duration = certainty (a legit
+// player loses a hidden enemy; a wallhacker stays glued). "swept" = bearing followed — high swept over
+// a long follow = tracked through turns, which pre-aim can't fake. Ranked longest first.
+if (followResults.Count > 0)
+{
+    Console.WriteLine($"\n=== wallhack.follow (tracked a MOVING unseen enemy >=3s): {followResults.Count} sessions ===");
+    Console.WriteLine("  longest follow first — seconds | bearing swept | start tick:");
+    foreach (var r in followResults.OrderByDescending(r => r.ms).Take(20))
+        Console.WriteLine($"    {r.ms / 1000f,4:F1}s  swept {r.sweep,4:F0}deg  tick {r.tick,-8}  {r.name,-22} {r.id,-18} [{r.demo}]");
+}
+
 return 0;
 
 // One line that rewrites itself, rather than 17k lines of scrollback.
@@ -367,7 +382,8 @@ static string CsvRow(PlayerResult r) =>
     $"{r.KillStill.ToString("F1", CultureInfo.InvariantCulture)},{r.KillOnTgt.ToString("F2", CultureInfo.InvariantCulture)}," +
     $"{r.RecoilSprays},{r.RecoilConsist.ToString("F3", CultureInfo.InvariantCulture)}," +
     $"{r.RecoilPull.ToString("F3", CultureInfo.InvariantCulture)},{r.RecoilRatio.ToString("F3", CultureInfo.InvariantCulture)}," +
-    $"{r.Revisits},{r.MaxPeekDepth}";
+    $"{r.Revisits},{r.MaxPeekDepth}," +
+    $"{r.FollowMs.ToString("F0", CultureInfo.InvariantCulture)},{r.FollowSweep.ToString("F0", CultureInfo.InvariantCulture)},{r.FollowTick}";
 
 static string Csv(string s) => s.Contains(',') || s.Contains('"') ? $"\"{s.Replace("\"", "\"\"")}\"" : s;
 
@@ -487,6 +503,18 @@ static async Task<(List<PlayerResult> players, List<ShotRow> shots)> ReplayOne(s
                                            // heard them, so it is not a "no information" case. Kills the
                                            // game-sense-via-sound confound that a still-only gate missed.
 
+    // wallhack.follow: sustained tracking of a MOVING unspotted enemy — the view stays on the enemy
+    // (err < cone) for >=3s while the enemy MOVES (active tracking, not a static hold). Longer = more
+    // certain. "swept" = bearing the view followed (a straight pre-aim sweeps little; following a turning
+    // enemy sweeps a lot — the part pre-aim can't fake).
+    var followState = new Dictionary<(int obs, int enemy), (float start, int startTick, float lastBearing, float swept)>();
+    var maxFollowMs = new Dictionary<int, float>();
+    var maxFollowSweep = new Dictionary<int, float>();
+    var maxFollowTick = new Dictionary<int, int>();
+    const float FollowCone = 5f;         // view must stay within this of the enemy
+    const float FollowMoveSpeed = 60f;   // enemy must be MOVING (u/s), not a static hold
+    const float FollowMinMs = 3000f;     // >=3s sustained to count
+
     void FlushSpray(int s)
     {
         if (sprayCurve.TryGetValue(s, out var curve) && curve.Count >= MinSprayShots &&
@@ -504,8 +532,9 @@ static async Task<(List<PlayerResult> players, List<ShotRow> shots)> ReplayOne(s
     const float BurstWindowSeconds = 0.25f;
 
     float roundStartTime = 0f;
+    int roundNumber = 0;
     float Now() => demo.CurrentDemoTick.Value / (float)Math.Max(1, CsDemoParser.TickRate);
-    demo.Source1GameEvents.RoundStart += _ => roundStartTime = Now();
+    demo.Source1GameEvents.RoundStart += _ => { roundStartTime = Now(); roundNumber++; };
 
     void Report(IDetector detector, Signal? signal)
     {
@@ -867,6 +896,38 @@ static async Task<(List<PlayerResult> players, List<ShotRow> shots)> ReplayOne(s
                     revisitState[rk] = rs;
                 }
 
+                // wallhack.follow: is the view actively TRACKING a MOVING unseen enemy? Extend a window
+                // while [unspotted + enemy moving + on target]; record the LONGEST, with bearing swept.
+                // Longer = more certain (a legit player loses a hidden enemy; a wallhacker stays glued).
+                {
+                    float espeed = 0f;
+                    if (trackers.TryGetValue(enemyId - 1, out var eTf) && eTf.Count >= 2)
+                    { float dtf = eTf[0].Time - eTf[1].Time; if (dtf > 0f) espeed = Vector3.Distance(eTf[0].Origin, eTf[1].Origin) / dtf; }
+                    var fk = (slot, enemyId);
+                    var fs = followState.GetValueOrDefault(fk);
+                    if (espeed > FollowMoveSpeed && err < FollowCone)
+                    {
+                        if (fs.start == 0f) fs = (now, demo.CurrentDemoTick.Value, bearingYaw, 0f);
+                        else { float db = bearingYaw - fs.lastBearing; db -= 360f * MathF.Round(db / 360f); fs = (fs.start, fs.startTick, bearingYaw, fs.swept + MathF.Abs(db)); }
+                    }
+                    else
+                    {
+                        if (fs.start > 0f)
+                        {
+                            float dur = (now - fs.start) * 1000f;
+                            if (dur >= FollowMinMs && dur > maxFollowMs.GetValueOrDefault(slot))
+                            {
+                                maxFollowMs[slot] = dur; maxFollowSweep[slot] = fs.swept; maxFollowTick[slot] = fs.startTick;
+                                if (revisitTarget != 0 && steamIds.GetValueOrDefault(slot) == revisitTarget)
+                                    Console.WriteLine($"  [FOLLOW {dur / 1000f:F1}s] round {roundNumber}, {fs.start - roundStartTime:F0}s in  tick={fs.startTick,-8} " +
+                                        $"{names.GetValueOrDefault(slot, "?"),-16} tracked a MOVING unseen enemy — bearing swept {fs.swept:F0}deg");
+                            }
+                        }
+                        fs = default;
+                    }
+                    followState[fk] = fs;
+                }
+
                 // THE NULL TEST. Every metric built here so far asks how GOOD a player is, and a
                 // cheat with aim assist just makes someone statistically excellent - which is what
                 // it is sold to do. So levels overlap, the six measured all landed at 1.2-1.8x,
@@ -1016,6 +1077,9 @@ static async Task<(List<PlayerResult> players, List<ShotRow> shots)> ReplayOne(s
         recoilRatio.GetValueOrDefault(kv.Key, -1f),
         revisitCount.GetValueOrDefault(kv.Key),
         maxDepth.GetValueOrDefault(kv.Key),
+        maxFollowMs.GetValueOrDefault(kv.Key),
+        maxFollowSweep.GetValueOrDefault(kv.Key),
+        maxFollowTick.GetValueOrDefault(kv.Key),
         signals.Where(s => s.Key.slot == kv.Key).ToDictionary(s => s.Key.detector, s => s.Value)))
         .ToList();
     return (playerRows, shots);
@@ -1031,7 +1095,7 @@ internal sealed record PlayerResult(
     int UnseenSamples, int UnseenNow, int UnseenPast,
     int Kills, float KillWall, float KillStill, float KillOnTgt,
     int RecoilSprays, float RecoilConsist, float RecoilPull, float RecoilRatio,
-    int Revisits, int MaxPeekDepth, Dictionary<string, int> Signals)
+    int Revisits, int MaxPeekDepth, float FollowMs, float FollowSweep, int FollowTick, Dictionary<string, int> Signals)
 {
     public string Detail =>
         Signals.Count > 0 ? string.Join(", ", Signals.Select(kv => $"{kv.Key}×{kv.Value}")) : "no signals";
