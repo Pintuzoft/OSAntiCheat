@@ -14,5 +14,9 @@ demos/
 # local analysis scratch
 scratch_wallers.csv
 
+# DemoReplay run outputs — carry real player IDs and names, and are reproducible
+baseline*.csv
+shots*.csv
+
 # Private third-party data (ban list, real player IDs) — never publish
 private/
