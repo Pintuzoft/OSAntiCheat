@@ -887,3 +887,147 @@ off-angle-bedömningen. **I rätt omständigheter (still fiende, off-angle, 1s+ 
 - [ ] Full-arkiv-körning för riktig fire rate (~7%?) + granska topp-träffarna (är de äkta dubbelpeekar?).
 - [ ] Om volymen håller: wire:a in log-only som en wallhack-*misstänkt*-axel (aldrig auto-action), med
       klipp-dump i larmet (typad ledtråd + bevis, inte anklagelse).
+
+## ⚠️ DAGENS STORA SYNTHES (2026-07-18): server-statistik har ett hårt tak för wallhack
+
+Kalibreringslabbet mot 4772 riktiga demos + live-logg avslöjade gränsen för vad server-data kan.
+
+**Meta-fyndet (det viktigaste):** **ägaren (Pintuz) toppar VARJE axel** — recoil (0,06), null-test (z=13),
+follow (20s) — och de bästa legit-kontrollerna sitter i toppen på alla. Det är inte slump:
+> **Skicklighet ⊇ de wallhack/aim-tells vi kan mäta server-side.** Aim-forward, håll-vinklar, pre-aim,
+> spåra rörliga fiender — allt som avslöjar en fuskare avslöjar också en *skicklig* spelare, för det är
+> samma beteende. Taket: de bästa legit ser ut som milda fuskare på varenda axel. Bara sällsynta,
+> specifika EPISODER (för människo-granskning) separerar; inget auto-detekterar rent.
+
+**Null-test läcker LIVE (flaggskeppet):** deployade `wallhack.nulltest` fyrar på hela stammis-basen
+inkl. ägaren, z=5–13. Orsak: z = signifikans, växer med √(N); legit har en *verklig* present-över-past
+(~0,55–0,75) från **aim-forward** (du pre-aimar dit fienden är på *väg*, = present, inte past). Past-
+controlen cancellerar symmetrisk game sense men INTE riktad pre-aim. "z≈0 för legit" var fel antagande.
+Offline-"valideringen" visade RANKNING (fuskare högre), inte en ren tröskel. Fix (oprövad): tröskla på
+ANDELEN (effektstorlek) population-relativt över ~0,75, inte z — men gapet till fuskare är smalt/okänt.
+
+**wallhack.follow (byggd idag, `DemoReplay`):** följ en osedd fiende ≥3s medan den rör sig. TVÅ buggar
+hittade + fixade: (1) ackumulerade över spotted-luckor → 1500s "följningar" (fix: kräv kontinuitet); (2)
+momentan-hastighets-gaten false-positivade på en **taser/eco-STANDOFF** (båda väntar vid en vägg) → 20s
+"follow" (fix: kräv net-förflyttning ≥300u — *diagnosticerad av användarens spel-sense*). Ändå
+confoundad: ägaren toppar, långa följningar har lågt svep (~radiella håll), och sweep-genom-svängar
+BRYTER kontinuiteten strukturellt (när fienden svänger släpar siktet → err spikar → följningen bryts).
+Så den fångar det confoundade (raka håll) och missar det diskriminerande (svängar).
+
+**wallhack.revisit slutgiltig:** clutch(≤2) + tyst(≤140u/s) + 1s-lås(2,5°) + snabb(≤4s) + samma fiende +
+djup → **5/år, 0 trippel-peekar**. Extremt sällsynt misstänkt-lyftare (ej auto); även de kan vara callouts.
+
+**⭐ Demo-kompatibilitet (praktiskt, avgörande för produkten):** gamla demos blir OSPELBARA när Valve
+uppdaterar CS2 → `playdemo` funkar bara på FÄRSKA demos. Konsekvens: klipp-granskning (slutmålet) funkar
+bara nära live. **Pipelinen delas:** arkiv = KALIBRERING (baslinjer, funkar på gamla), live/färskt =
+MISSTÄNKT-LYFTARE + auto-ticket (måste flagga medan demon går att titta på).
+
+**Produkt-metrik-idé (perkulerar):** testa flera sätt att kvantifiera legit, ta 2 med OLIKA confounds,
+normalisera till percentil, MULTIPLICERA (XGuardian-mönstret still×on-target). En legit hög på en men
+normal på den andra → produkten dör; fuskare hög på båda → tänds. Kräver om-validering.
+
+- [ ] Nästa: juli-endast-körning (`--since 20260701`) → hitta en FÄRSK (spelbar) demo med en follow/revisit-
+      träff → titta på den i CS2 (den granskning gamla demos nekar oss). Sen ev. produkt-metrik-experimentet.
+- [ ] Null-test: byt z→andel + population-relativ tröskel, om-validera mot etiketterade fuskare (eller
+      erkänn att även den mäter aim-forward, inte information).
+
+## ⭐ Detektor-koncept: `wallhack.deadaim` (det parkerade skottet) — 2026-07-18
+
+**Ursprung:** ground-truth-granskning av en kvälls-demo 2026-07-18 (identiteter + full forensik i
+**`private/deadaim-case-20260718.md`**, gitignorerad). Ägaren såg det live: en gäst-spelare **G**
+(genomsnittlig hela mappen) drar ETT galet skott på stammis **K** genom en rök i runda 7.
+`--revisit-detail` på G:s kills bekräftade och kvantifierade det.
+
+**Skottet, rekonstruerat (runda 7, tick 43021, deagle HEADSHOT, ~1135u / ~22m):**
+```
+kill = HEADSHOT genom rök                   — frusna siktet låg på HUVUDHÖJD, ej bara silhuetten
+crosshair FRUSET 2750ms  (<0,15°/tick)     — handen ligger still, nästan 3 sekunder
+osedd av G  64/64 ticks                    — ingen egen LOS i uppspelet (rök)
+osedd av HELA laget 0/64 ticks (team-saw)  — ingen lagkamrat hade ögon → ingen callout-källa
+offret KRYPER in i linjen: 110u, net 110u  — rak, långsam, TYST rörelse (mindre ljud att reagera på)
+aimErr 2,7° → 0,1° (t-94ms) → 0,5° @skott  — K gör hela konvergensen; G justerar inte (bitfruset)
+skott ~94ms EFTER närmsta punkt              — mänsklig reaktionsbeat, INTE trigger (den fyrat vid 0,1°)
+sig 0,060 → 0,239 efter acos-fixen          — rank 1/164 i demon på gatedSig, 4,5× marginal
+```
+G:s andra helt blinda kill (runda 16) var raka motsatsen: 75°/s spray, 18,9° fel. **Ingen
+upprepning i den här demon** — n=1 event. Repetition kräver hans övriga (färska) matcher; han finns ej
+i sample-korpusen (demos/).
+
+**Konceptet:** diskret event = **fruset sikte (frys ≥ ~1s) + osedd av hela laget + offret rör sig IN i
+linjen + off-angle mot baslinjen → kill.** Producerar ett klipp (tick + offer + trajektoria), korroborerar
+mot nolltestet utan att överlappa (episod, inte per-tick-aggregat).
+
+**Ärlig placering — detta är INTE en ny ren detektor.** Det är `killWall` (XGuardians still×on-target,
+AUC 0,68) som redan visat sig **toppa på skickliga regulars** utan past-control (rad ~496). Det `deadaim`
+lägger till är tre axlar porten saknade:
+| Axel | Skottet | Ny mot killWall? |
+|---|---|---|
+| Team-info (såg NÅGON i laget offret?) | 0/64 | ✅ ja — callout-exculpation, vår team-level-princip |
+| Offer-rörelse (rör sig offret in i linjen?) | kryper 110u tyst | ✅ ja — rörligt osynligt mål > parkerat på stilla |
+| Frys-längd (avsiktlig park?) | 2750ms | ✅ ja — skiljer park från råkande svep |
+| **Off-angle mot baslinje** | **okänt** | ⛔ **saknas — det avgörande** |
+
+**Taket gäller ändå (2026-07-18-syntesen):** utan off-angle-grinden fångar "fruset + på-mål + osett"
+bara **bra pre-aim på en vanlig lane** — och en skicklig regular (ägaren) gör det hela tiden. Skottet är
+**observationellt identiskt** med en tursam common-angle-hold tills baslinjen säger att punkten var udda.
+Off-angle-baslinjen ("vart pekar folk härifrån på de_nache", populations-relativ, ej handkodad) är samma
+obyggda grind som blockerat revisit/track hela vägen. **Den är förutsättningen, inte en detalj.**
+
+**Roll (per fusktypens tak):** wallhack = **misstänkt-lyftare + klipp → admin granskar → admin bannar.**
+Aldrig auto-action, aldrig på ett event — bara på **rate över basraten** (som `wallhack.revisit` slutade).
+
+**Redan byggt (instrumentering, `DemoReplay`):** `--revisit-detail <steamId>` dumpar nu varje kill med
+`[KILL]`-rad (team-saw, offer-rörelse, frys-ms, positioner) + per-tick-trajektoria för de blinda. Räcker
+för retroaktiv granskning; ingen live-kod ändrad.
+
+- [ ] **Off-angle-baslinje FÖRST** (blockerar allt annat): populations-heatmap "vart pekar folk härifrån"
+      per karta, så `deadaim` kan skilja fruset-på-faktisk-fiende från fruset-på-common-spot. Utan den: håll käft.
+- [ ] Mät basraten: kör arkivet (kalibrerings-split), fördelning av frusna-blinda-on-target kills per
+      alive-timme bland kända legit-regulars. Var landar G:s rate? (n=1 i en demo klarar aldrig baren.)
+- [ ] Repetition på G: dra hans övriga FÄRSKA demos, kör `--revisit-detail <steamId i private-filen>`,
+      se om parkerade-skott-mönstret återkommer eller om runda 7 är en ensam outlier (= slump).
+- [ ] Om det överlever: wire:a log-only som wallhack-misstänkt-axel med klipp-dump, gated på rate +
+      off-angle + gärna nolltest-korroboration. Färska demos only (klipp-granskning kräver spelbar demo).
+
+## ⭐ Bone-lock / head-precision: SKILL-INVARIANT med hård kant — validerad mot proffs — 2026-07-22
+
+**Idén (användarens):** "ingen kan klicka HS som en maskin" — ackumulera hur off HS-klick är från
+huvudets mittpunkt; en average nära noll = maskin. Byggd som `headErr` i DemoReplay: vinkel från
+**view-vektorn vid `WeaponFire`** (inte kulan — vapenspridning är brus cheatet inte styr) till offrets
+huvudcentrum (feet+64), first-of-burst + on-target (≤5°). Ny kolumn i skott-exporten + per-demo-tabell.
+
+**Mät-enheten är kvantiseringssteget 0,044°** (= 360/8192, uppmätt i deadaim-forensiken 2026-07-22:
+råa demo-vinklar stegar exakt 0,044). En rå aimbot beräknar exakt bone-vinkel och kvantiserar →
+**≤ ~0,022° varje låst skott — analytiskt, ingen synth behövs.** Människan siktar på ett huvud som
+spänner ~100 kvantceller → sprids. Statistiken är **"spike-andel ≤0,05°"** (mixture-robust: en
+togglares legit-skott kan inte späda ut spiken; average kan de lura — Oryx-tänket, fördelnings-form).
+
+**Trepopulations-test samma kväll (~2 200 on-target first shots):**
+```
+                        medianer      p10          spikes (≥3 = maskin)
+oldswedes stammisar(18) 0,93–2,31°   0,25–1,15°   0   (1 exakt-nolla/838 = slumpcell)
+VP vs NaVi, tier-1 (10) 0,92–2,19°   0,27–0,65°   0   (2 singlar/852)
+MOUZ NXT semi-pro  (10) 1,48–2,18°   0,18–0,87°   0   (1 singel/509)
+```
+**b1t — en av världens bästa huvudklickare — median 1,85°, mitt i vår stammis-klunga.** Terminal
+klick-precision är motor-bunden ~1–2° median FÖR ALLA människor; proffs-skillnaden bor i allt annat
+(placering, disciplin, movement) som on-target-villkoret normaliserar bort. Alltså:
+
+> **Första axeln sedan recoil-variansen med HÅRD KANT i stället för skicklighets-gradient.**
+> Skicklighet glider INTE mot maskin-zonen här — världseliten ≈ stammisarna ≈ samma puckel, och
+> zonen ≤0,05° upprepat är TOM i alla tre populationerna. Enstaka exakt-träffar sker på slumpnivå
+> (~0,2% av skotten, aldrig upprepat) — därför spike-ANDEL, aldrig enskilt skott.
+
+Proffsdemos = perfekt negativ kontroll (extrema högersvansen av mänskligt): flaggar måttet proffs
+→ det mäter skicklighet → dött; puckel utan spik → golvet överlever sitt hårdaste naturliga test.
+Det överlevde. (Källa: demofile-net:s publika test-fixtures — VP–NaVi Ancient 2024, MOUZ NXT–Space.
+HLTV är Cloudflare-blockerat från sandboxen; bo3.gg:s demos bakom inlogg.)
+
+- [ ] **Definitivt golv: kör arkivet** (6,1M skott, `headErrDeg`-kolumnen finns nu i exporten) —
+      var ligger populationens spike-andel? Förväntat ~0 utom slump-singlar. Sen tröskel under golvet.
+- [ ] Verifiera kvant-steget på 128-tick-demos (proffsen) vs våra 64-tick — samma 0,044° eller finare?
+      Påverkar var maskin-zonen slutar.
+- [ ] Humaniserings-taket (ärligt): slumpad offset inom hitboxen slår spike-checken → då är detta
+      "fångar de lata"-tiern + varians-backstopp (för-tight fördelning self-normaliserat) för resten.
+- [ ] Efter arkiv-golvet: wire:a som **andra bortom-mänskligt-auto-axeln** (efter anti-recoil <0,04):
+      spike-andel över tröskel = "trolig bone-lock aimbot", typad ledtråd + klipp, aldrig på ett skott.
