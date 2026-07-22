@@ -1,0 +1,8 @@
+{
+  "deadaimMin": 0.05,
+  "boneLockMinSpikes": 2,
+  "antiRecoilMaxRatio": 0.04,
+  "antiRecoilMinSprays": 6,
+  "nullTestMinExcess": 0.02,
+  "nullTestMinSamples": 2000
+}
