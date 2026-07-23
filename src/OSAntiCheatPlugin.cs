@@ -65,6 +65,7 @@ public sealed class OSAntiCheatPlugin : BasePlugin, IPluginConfig<OSAntiCheatCon
             config.AimbotMinViewRateDegPerSec, config.AimbotMinSweepShots, config.AimbotMinSweepHitRate);
         _triggerbot = new TriggerbotDetector(config.TriggerbotHumanFloorMs, config.TriggerbotMinShots);
         _spinbot = new SpinbotDetector(config.SpinbotMinRateDegPerSec);
+        // (SpinbotMinRateDegPerSec is the per-tick spin floor; the continuous-turn + spin-HS gates are internal.)
         _boneLock = new BoneLockDetector(config.BoneLockSpikeDeg, config.BoneLockMinSpikes);
         _wallhack = new WallhackDetector(
             config.WallhackMinTrackSeconds, config.WallhackMinEnemyMoveUnits,
@@ -93,8 +94,12 @@ public sealed class OSAntiCheatPlugin : BasePlugin, IPluginConfig<OSAntiCheatCon
         // Sample every player's state once per server tick — the data source for all detectors.
         RegisterListener<Listeners.OnTick>(_tracking.OnTick);
 
-        // Shot-triggered detectors: aimbot sweep + triggerbot.
+        // Shot-triggered detectors: aimbot sweep + triggerbot + bone-lock.
         RegisterEventHandler<EventWeaponFire>(OnWeaponFire);
+
+        // Kill-triggered: the spin+HS signature (a headshot landed mid-spin). Spinbots get banned
+        // fast and rarely leave a readable demo, so the LIVE module is the only place to catch them.
+        RegisterEventHandler<EventPlayerDeath>(OnPlayerDeath);
 
         // Spinbot is time-windowed, not shot-triggered; poll it a few times a second.
         AddTimer(0.2f, PollSpinbot, TimerFlags.REPEAT);
@@ -127,6 +132,7 @@ public sealed class OSAntiCheatPlugin : BasePlugin, IPluginConfig<OSAntiCheatCon
                 _engine.Remove(player.Slot);
                 _aimbot.Remove(player.Slot);
                 _triggerbot.Remove(player.Slot);
+                _spinbot.Remove(player.Slot);
                 _boneLock.Remove(player.Slot);
                 _wallhack.Remove(player.Slot);
                 _wallhackGaze.Remove(player.Slot);
@@ -181,6 +187,19 @@ public sealed class OSAntiCheatPlugin : BasePlugin, IPluginConfig<OSAntiCheatCon
         if (Config.EnableBoneLock && !burstContinuation)
             Report(_boneLock, _boneLock.OnFire(shooterTracker, enemies, now));
 
+        return HookResult.Continue;
+    }
+
+    private HookResult OnPlayerDeath(EventPlayerDeath @event, GameEventInfo info)
+    {
+        var attacker = @event.Attacker;
+        if (attacker is null || !attacker.IsValid) return HookResult.Continue;
+        if (attacker.IsBot && !Config.IncludeBots) return HookResult.Continue;
+        if (!Config.EnableSpinbot) return HookResult.Continue;
+
+        var tracker = _tracking.For(attacker.Slot);
+        if (tracker is not null)
+            Report(_spinbot, _spinbot.OnKill(tracker, @event.Headshot, Server.CurrentTime));
         return HookResult.Continue;
     }
 

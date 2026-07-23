@@ -19,6 +19,14 @@ public sealed class TrackingService
     private readonly Dictionary<int, PlayerTracker> _trackers = new();
     private int _sequence;
 
+    // Per-pawn spotted-mask history, keyed by sequence: bit s = observer slot s has this pawn
+    // spotted. TickSample stays primitive/position-only, so the mask rides in a parallel ring —
+    // the kill-anchored detectors need "was the victim spotted at THAT tick", not just live.
+    private const int MaskRing = 128;
+    private readonly Dictionary<int, int[]> _maskSeq = new();
+    private readonly Dictionary<int, ulong[]> _maskVal = new();
+    private readonly Dictionary<int, int> _maskPos = new();
+
     public IReadOnlyDictionary<int, PlayerTracker> Trackers => _trackers;
 
     public PlayerTracker? For(int slot) =>

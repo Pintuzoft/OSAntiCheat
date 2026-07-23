@@ -23,22 +23,76 @@ public class DetectorTests
     // ---- Spinbot ----------------------------------------------------------
 
     [Fact]
-    public void Spinbot_flags_sustained_high_yaw()
+    public void Spinbot_flags_continuous_multi_turn_rotation()
     {
+        // ~2000°/s for 40 ticks ≈ 1250° = 3.5 continuous turns — a human can't rotate that far unbroken.
         var t = new PlayerTracker(64, slot: 3);
         float time = 0f, yaw = 0f;
-        for (int seq = 0; seq < 20; seq++)
+        for (int seq = 0; seq < 40; seq++)
         {
-            t.Add(Sample(seq, time, Vector3.Zero, new ViewAngles(0f, yaw, 0f)));
+            t.Add(Sample(seq, time, Vector3.Zero, new ViewAngles(0f, yaw % 360f, 0f)));
             time += TickDt;
-            yaw += 2000f * TickDt; // ~2000 deg/s, one direction — impossible to sustain by hand
+            yaw += 2000f * TickDt;
         }
 
         var signal = new SpinbotDetector().Inspect(t);
-
         Assert.NotNull(signal);
         Assert.Equal("spinbot", signal!.Value.Detector);
-        Assert.Equal(3, signal.Value.PlayerSlot);
+        Assert.Equal(DetectorKind.LogicBreach, new SpinbotDetector().Kind);
+    }
+
+    [Fact]
+    public void Spinbot_ignores_a_fast_flick_that_stops()
+    {
+        // A ~250° flick over 5 ticks (fast!) then STOPS — under two full turns, never fires.
+        var t = new PlayerTracker(64, slot: 3);
+        float time = 0f, yaw = 0f;
+        for (int seq = 0; seq < 5; seq++)
+        {
+            t.Add(Sample(seq, time, Vector3.Zero, new ViewAngles(0f, yaw, 0f)));
+            time += TickDt; yaw += 50f; // ~3200°/s but only 250° total
+        }
+        for (int seq = 5; seq < 25; seq++) // then holds still
+        {
+            t.Add(Sample(seq, time, Vector3.Zero, new ViewAngles(0f, yaw, 0f)));
+            time += TickDt;
+        }
+        Assert.Null(new SpinbotDetector().Inspect(t));
+    }
+
+    [Fact]
+    public void Spinbot_OnKill_flags_repeated_headshots_mid_spin()
+    {
+        // Continuously spinning ~2000°/s (>360° in the recent buffer, still spinning at the kill).
+        static PlayerTracker Spinning()
+        {
+            var t = new PlayerTracker(64, slot: 3);
+            float time = 0f, yaw = 0f;
+            for (int seq = 0; seq < 30; seq++)
+            {
+                t.Add(Sample(seq, time, Vector3.Zero, new ViewAngles(0f, yaw % 360f, 0f)));
+                time += TickDt; yaw += 2000f * TickDt;
+            }
+            return t;
+        }
+
+        var d = new SpinbotDetector(minSpinHsKills: 2);
+        Assert.Null(d.OnKill(Spinning(), headshot: true, now: 1f));   // 1st HS mid-spin — a fluke, silent
+        var signal = d.OnKill(Spinning(), headshot: true, now: 2f);  // 2nd — beyond human, fires
+        Assert.NotNull(signal);
+        Assert.Equal("spinbot", signal!.Value.Detector);
+    }
+
+    [Fact]
+    public void Spinbot_OnKill_ignores_headshot_that_is_not_a_spin()
+    {
+        // A normal aimed headshot (no rotation) never counts, however many times.
+        var still = new PlayerTracker(64, slot: 3);
+        for (int seq = 0; seq < 30; seq++)
+            still.Add(Sample(seq, seq * TickDt, Vector3.Zero, new ViewAngles(0f, 10f, 0f)));
+        var d = new SpinbotDetector(minSpinHsKills: 2);
+        Assert.Null(d.OnKill(still, headshot: true, now: 1f));
+        Assert.Null(d.OnKill(still, headshot: true, now: 2f));
     }
 
     [Fact]
