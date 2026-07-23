@@ -219,7 +219,7 @@ if (shotsPath is not null)
     // switchMs/switchDeg are -1 when the shot stayed on the same target.
     // demo first: without it the file can't be deduped or resumed, and a half-finished run
     // silently doubles some players' shots.
-    if (freshShots) shotsCsv.WriteLine("demo,steamId,name,aimErrDeg,switchMs,switchDeg,onTargetMs,viewRateDegPerSec,burstStart,headErrDeg");
+    if (freshShots) shotsCsv.WriteLine("demo,steamId,name,aimErrDeg,switchMs,switchDeg,onTargetMs,viewRateDegPerSec,burstStart,headErrDeg,tick,targetId");
     shotsCsv.Flush();
 }
 
@@ -287,7 +287,7 @@ await Parallel.ForEachAsync(demoFiles, new ParallelOptions { MaxDegreeOfParallel
                         $"{sh.OnTargetMs.ToString("F0", CultureInfo.InvariantCulture)}," +
                         $"{sh.ViewRateDegPerSec.ToString("F0", CultureInfo.InvariantCulture)}," +
                         $"{sh.BurstStart}," +
-                        $"{sh.HeadErrDeg.ToString("F3", CultureInfo.InvariantCulture)}");
+                        $"{sh.HeadErrDeg.ToString("F3", CultureInfo.InvariantCulture)},{sh.Tick},{sh.TargetId}");
                 foreach (var k in killRows)
                     killsCsv?.WriteLine($"{Csv(Path.GetFileName(file))},{k.AttackerId},{Csv(k.AttackerName)},{k.VictimId},{Csv(k.VictimName)}," +
                         $"{k.Round},{k.Tick},{Csv(k.Weapon)},{(k.Headshot ? 1 : 0)},{k.Dmg}," +
@@ -1030,7 +1030,8 @@ static async Task<(List<PlayerResult> players, List<ShotRow> shots, List<KillRow
         shots.Add(new ShotRow(
             steamIds.GetValueOrDefault(slot), names.GetValueOrDefault(slot, "?"),
             nearestErr, fromTarget >= 0 ? switchMs : -1f, fromTarget >= 0 ? switchDeg : -1f,
-            onTargetMs, viewRate, burst ? 0 : 1, headErr));
+            onTargetMs, viewRate, burst ? 0 : 1, headErr,
+            demo.CurrentDemoTick.Value, steamIds.GetValueOrDefault(nearestId)));
     };
 
     float lastPoll = float.NegativeInfinity;
@@ -1439,7 +1440,7 @@ static async Task<(List<PlayerResult> players, List<ShotRow> shots, List<KillRow
 
 internal readonly record struct ShotRow(
     ulong SteamId, string Name, float AimErrDeg, float SwitchMs, float SwitchDeg, float OnTargetMs,
-    float ViewRateDegPerSec, int BurstStart, float HeadErrDeg);
+    float ViewRateDegPerSec, int BurstStart, float HeadErrDeg, int Tick, ulong TargetId);
 
 // Detector knobs, loaded from --config <json>. The tuned file is the future plugin config:
 // calibrated offline against known-legit players, ported verbatim to live. All thresholds sit on
