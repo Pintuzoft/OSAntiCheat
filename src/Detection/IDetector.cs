@@ -19,4 +19,12 @@ public interface IDetector
     /// trustworthy / independent this axis is — kept low for FP-prone detectors.
     /// </summary>
     float Weight { get; }
+
+    /// <summary>
+    /// Response class: <see cref="DetectorKind.Behavioural"/> (improbable → review only) or
+    /// <see cref="DetectorKind.LogicBreach"/> (beyond-human → auto-eligible). Defaults to
+    /// Behavioural — the conservative ceiling — so a detector only reaches auto-action by
+    /// explicitly declaring it measures a mechanical impossibility.
+    /// </summary>
+    DetectorKind Kind => DetectorKind.Behavioural;
 }

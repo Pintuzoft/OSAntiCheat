@@ -35,6 +35,7 @@ public sealed class OSAntiCheatPlugin : BasePlugin, IPluginConfig<OSAntiCheatCon
     private AimbotSweepDetector _aimbot = new();
     private TriggerbotDetector _triggerbot = new();
     private SpinbotDetector _spinbot = new();
+    private BoneLockDetector _boneLock = new();
     private WallhackDetector _wallhack = new();
     private WallhackGazeDetector _wallhackGaze = new();
     private NullTestDetector _nullTest = new();
@@ -43,6 +44,7 @@ public sealed class OSAntiCheatPlugin : BasePlugin, IPluginConfig<OSAntiCheatCon
     private AlertSink? _alerts;
 
     private readonly Dictionary<int, float> _lastFire = new();
+    private readonly Dictionary<string, DetectorKind> _detectorKinds = new(); // detector id -> response class
     private const float BurstWindowSeconds = 0.25f; // shots closer than this count as one burst
     private float _roundStartTime; // server time of the latest round start
 
@@ -63,6 +65,7 @@ public sealed class OSAntiCheatPlugin : BasePlugin, IPluginConfig<OSAntiCheatCon
             config.AimbotMinViewRateDegPerSec, config.AimbotMinSweepShots, config.AimbotMinSweepHitRate);
         _triggerbot = new TriggerbotDetector(config.TriggerbotHumanFloorMs, config.TriggerbotMinShots);
         _spinbot = new SpinbotDetector(config.SpinbotMinRateDegPerSec);
+        _boneLock = new BoneLockDetector(config.BoneLockSpikeDeg, config.BoneLockMinSpikes);
         _wallhack = new WallhackDetector(
             config.WallhackMinTrackSeconds, config.WallhackMinEnemyMoveUnits,
             config.WallhackMinBearingChangeDeg, config.WallhackFollowFraction,
@@ -77,6 +80,12 @@ public sealed class OSAntiCheatPlugin : BasePlugin, IPluginConfig<OSAntiCheatCon
     {
         _alerts = new AlertSink(Logger, Config.LogPath);
         _engine.TierRaised += OnTierRaised;
+
+        // Map each detector to its response class so an alert can be labelled by the highest tier
+        // that contributed (a LogicBreach signal makes the whole alert "beyond human").
+        foreach (IDetector d in new IDetector[]
+                 { _aimbot, _triggerbot, _spinbot, _boneLock, _wallhack, _wallhackGaze, _nullTest })
+            _detectorKinds[d.Id] = d.Kind;
 
         Logger.LogInformation(
             "OSAntiCheat {Version} loaded (hotReload={HotReload})", ModuleVersion, hotReload);
@@ -118,6 +127,7 @@ public sealed class OSAntiCheatPlugin : BasePlugin, IPluginConfig<OSAntiCheatCon
                 _engine.Remove(player.Slot);
                 _aimbot.Remove(player.Slot);
                 _triggerbot.Remove(player.Slot);
+                _boneLock.Remove(player.Slot);
                 _wallhack.Remove(player.Slot);
                 _wallhackGaze.Remove(player.Slot);
                 _nullTest.Remove(player.Slot);
@@ -165,6 +175,11 @@ public sealed class OSAntiCheatPlugin : BasePlugin, IPluginConfig<OSAntiCheatCon
 
         if (Config.EnableTriggerbot && !burstContinuation)
             Report(_triggerbot, _triggerbot.OnFire(shooterTracker, enemies, now));
+
+        // Bone-lock: head-centre precision at the shot. First-of-burst + on-target, same as the
+        // others; the detector applies its own degenerate-range guard and repetition gate.
+        if (Config.EnableBoneLock && !burstContinuation)
+            Report(_boneLock, _boneLock.OnFire(shooterTracker, enemies, now));
 
         return HookResult.Continue;
     }
@@ -410,23 +425,35 @@ public sealed class OSAntiCheatPlugin : BasePlugin, IPluginConfig<OSAntiCheatCon
         var player = Utilities.GetPlayerFromSlot(alert.PlayerSlot);
         if (player is not null && player.IsBot && !Config.IncludeBots) return; // no bot alerts in production
 
+        // Response class = the highest-tier detector that contributed. One LogicBreach signal
+        // (beyond-human) makes the whole alert auto-eligible; otherwise it's a review flag.
+        var responseClass = alert.RecentSignals.Any(
+            s => _detectorKinds.GetValueOrDefault(s.Detector) == DetectorKind.LogicBreach)
+            ? DetectorKind.LogicBreach : DetectorKind.Behavioural;
+
         // Always log (JSON-lines + console) — the durable record.
-        _alerts?.Handle(alert, player?.PlayerName, player?.SteamID.ToString());
+        _alerts?.Handle(alert, player?.PlayerName, player?.SteamID.ToString(), responseClass);
 
         // Additionally ping online admins in chat so they don't have to read logs.
         if (Config.NotifyAdminsInChat)
-            NotifyAdmins(alert, player);
+            NotifyAdmins(alert, player, responseClass);
     }
 
-    private void NotifyAdmins(SuspicionAlert alert, CCSPlayerController? subject)
+    private void NotifyAdmins(SuspicionAlert alert, CCSPlayerController? subject,
+        DetectorKind responseClass = DetectorKind.Behavioural)
     {
         string name = subject?.PlayerName ?? $"slot {alert.PlayerSlot}";
         string detectors = string.Join(", ", alert.RecentSignals
             .Select(s => s.Detector)
             .Distinct());
 
+        // Beyond-human breaches scream (red); improbable review flags whisper "could be luck" (yellow).
+        bool breach = responseClass == DetectorKind.LogicBreach;
+        string label = breach ? "LOGIC BREACH" : "review — could be luck";
+        char labelColor = breach ? ChatColors.Red : ChatColors.Yellow;
+
         string message =
-            $" {ChatColors.Red}[OSAC]{ChatColors.Default} {ChatColors.Yellow}{alert.Tier}{ChatColors.Default}: " +
+            $" {ChatColors.Red}[OSAC]{ChatColors.Default} {labelColor}{label}{ChatColors.Default}: " +
             $"{ChatColors.Green}{name}{ChatColors.Default} " +
             $"(score {alert.Score:F1}) — {detectors}";
 

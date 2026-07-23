@@ -64,6 +64,20 @@ public sealed class OSAntiCheatConfig : BasePluginConfig
     [JsonPropertyName("EnableSpinbot")]
     public bool EnableSpinbot { get; set; } = true;
 
+    /// <summary>
+    /// Bone-lock aimbot: repeated head-CENTRE locks tighter than a human hand. A LOGIC-BREACH axis
+    /// (beyond-human), validated skill-invariant vs tier-1 pros. On by default; the two knobs below
+    /// set what counts as a lock and how many repeats before it speaks.
+    /// </summary>
+    [JsonPropertyName("EnableBoneLock")]
+    public bool EnableBoneLock { get; set; } = true;
+
+    /// <summary>Head-centre aim error (degrees) at fire that counts as a machine lock. One quant step ≈ 0.044°.</summary>
+    public float BoneLockSpikeDeg { get; set; } = 0.05f;
+
+    /// <summary>Repeated locks required before flagging — one exact hit is chance (~0.2%), never a lock.</summary>
+    public int BoneLockMinSpikes { get; set; } = 3;
+
     [JsonPropertyName("EnableWallhack")]
     public bool EnableWallhack { get; set; } = true;
 

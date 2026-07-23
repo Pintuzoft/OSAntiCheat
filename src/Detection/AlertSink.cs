@@ -44,13 +44,22 @@ public sealed class AlertSink
         }
     }
 
-    public void Handle(SuspicionAlert alert, string? playerName, string? steamId)
+    public void Handle(SuspicionAlert alert, string? playerName, string? steamId,
+        DetectorKind responseClass = DetectorKind.Behavioural)
     {
+        // The owner's two tiers: a LogicBreach contribution means "beyond human" (auto-eligible);
+        // otherwise it's a review flag ("improbable, a human could have — worth a look").
+        string responseLabel = responseClass == DetectorKind.LogicBreach
+            ? "LOGIC BREACH (beyond human)"
+            : "REVIEW (improbable — human confirms)";
+
         var record = new
         {
             type = "alert",
             time = alert.Time,
             tier = alert.Tier.ToString(),
+            responseClass = responseClass.ToString(),
+            responseLabel,
             slot = alert.PlayerSlot,
             name = playerName,
             steamId,
@@ -71,8 +80,8 @@ public sealed class AlertSink
         }
 
         _logger.LogWarning(
-            "[OSAC] {Tier} — {Name} ({SteamId}) score={Score:F2} :: {Reasons}",
-            alert.Tier, playerName ?? "?", steamId ?? "?", alert.Score,
+            "[OSAC] {Tier} / {Response} — {Name} ({SteamId}) score={Score:F2} :: {Reasons}",
+            alert.Tier, responseLabel, playerName ?? "?", steamId ?? "?", alert.Score,
             string.Join(" | ", alert.RecentSignals.Select(s => $"{s.Detector}~{s.Confidence:F2} ({s.Reason})")));
     }
 }
