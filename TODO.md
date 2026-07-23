@@ -1051,9 +1051,11 @@ Fråga (ägarens): har vi allt CS:S/CS:GO-SourceMod hade? Nej — men det mesta 
 ### Nivå 1 — Extension/bibliotek som redan existerar (installera/referera)
 - [ ] **[CS2TraceRay](https://github.com/schwarper/CS2TraceRay)** (NuGet): world-trace för CSSharp →
       LIVE LOS + ljud-ocklusion + off-angle-geometri. Låser upp TODO:ns största tekniska risk.
-- [ ] **[ExternalAutoWallCS2](https://github.com/Read1dno/ExternalAutoWallCS2)**-metoden: extrahera
-      kollisionsgeometri ur `.vpk` + egen BVH-raycast = **OFFLINE-LOS för DemoReplay** — det är vägen
-      till off-angle-baslinjen utan live-server (arkivet kan geometri-analyseras retroaktivt!).
+- [ ] **Offline-LOS för DemoReplay** via ren Source2-kartparsning: [ValveResourceFormat/Source2Viewer]
+      (https://github.com/ValveResourceFormat/ValveResourceFormat) (MIT, SteamDatabase) extraherar
+      kollisionsgeometri ur `.vpk` → bygg BVH → raycasta. Ger off-angle-baslinjen utan live-server
+      (arkivet kan geometri-analyseras retroaktivt). OBS: neutral map-parsing (samma teknik som radar/
+      nav-verktyg) — INTE cheat-repon som paketerar "autowall"; ta tekniken, aldrig sån kod.
 
 ### Nivå 2 — Kräver hook-arbete (usercmd/subtick — största vinsten, mest jobb)
 Source1:s `OnPlayerRunCmd` (rå per-command: knappar, vinklar, tickcount) var klassiska AC:ers ryggrad
