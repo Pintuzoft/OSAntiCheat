@@ -36,6 +36,7 @@ string? killsPath = null;   // --kills out.csv: one row per kill with raw deadai
 string? configPath = null;  // --config thresholds.json: per-detector knobs for the detections report
 string? since = null, until = null;
 string? failLog = null;
+string? skipFile = null;   // --skip fails.txt: don't re-attempt demos a prior run already failed on
 int limit = 0;   // sanity-check a sample before committing an hour to the whole archive
 int jobs = Math.Max(1, Environment.ProcessorCount - 2); // parsing is CPU-bound; leave a couple free
 ulong revisitTarget = 0; // --revisit-detail <steamId>: print each double-peek episode (tick+time+enemy) to review
@@ -51,6 +52,7 @@ for (int i = 1; i < args.Length; i++)
     if (args[i] == "--since" && i + 1 < args.Length) since = args[i + 1];
     if (args[i] == "--until" && i + 1 < args.Length) until = args[i + 1];
     if (args[i] == "--fail-log" && i + 1 < args.Length) failLog = args[i + 1];
+    if (args[i] == "--skip" && i + 1 < args.Length) skipFile = args[i + 1];
     if (args[i] == "--limit" && i + 1 < args.Length && int.TryParse(args[i + 1], out var L)) limit = L;
     if (args[i] == "--revisit-detail" && i + 1 < args.Length) ulong.TryParse(args[i + 1], out revisitTarget);
 }
@@ -63,6 +65,20 @@ var demoFiles = Directory.Exists(path)
                     f.EndsWith(".dem.gz", StringComparison.OrdinalIgnoreCase))
         .OrderBy(f => f).ToList()
     : File.Exists(path) ? new List<string> { path } : new List<string>();
+
+// --skip: drop demos a prior run already failed on (fail-log format: "basename<TAB>reason"). Those
+// produced no data — skipping them turns a re-parse over the whole archive into one over just the
+// readable demos (e.g. 7.8k CS2 vs 26k total: the CSun/CFireSmoke workshop maps never parse).
+if (skipFile is not null && File.Exists(skipFile))
+{
+    var skip = File.ReadLines(skipFile)
+        .Select(l => l.Split('\t')[0].Trim())
+        .Where(s => s.Length > 0)
+        .ToHashSet(StringComparer.OrdinalIgnoreCase);
+    int before = demoFiles.Count;
+    demoFiles = demoFiles.Where(f => !skip.Contains(Path.GetFileName(f))).ToList();
+    Console.WriteLine($"--skip {skipFile}: skipping {before - demoFiles.Count} known-failed demo(s), {demoFiles.Count} to parse");
+}
 
 // Pick a demo's date without opening it. Archive names vary by server config — the date may be
 // at the front, after the map name, or absent entirely — so look for a plausible YYYYMMDD run
@@ -207,7 +223,7 @@ if (csvPath is not null)
     // (resume granularity is a whole demo anyway), thousands of times fewer syscalls.
     csv = new StreamWriter(csvPath, append: true) { AutoFlush = false };
     // aliveMinutes is the exposure: without it you cannot compute a rate or a Poisson baseline.
-    if (fresh) csv.WriteLine("demo,steamId,name,peakScore,aliveMinutes,wallhackTrack,aimbotSweep,triggerbot,shots,hits,headshots,unseenSamples,unseenNow,unseenPast,kills,killWall,killStill,killOnTgt,recoilSprays,recoilConsist,recoilPull,recoilRatio,revisits,maxPeekDepth,followMs,followSweep,followTick,killWallMax,headN,headSpike");
+    if (fresh) csv.WriteLine("demo,steamId,name,peakScore,aliveMinutes,wallhackTrack,aimbotSweep,triggerbot,shots,hits,headshots,unseenSamples,unseenNow,unseenPast,kills,killWall,killStill,killOnTgt,recoilSprays,recoilConsist,recoilPull,recoilRatio,revisits,maxPeekDepth,followMs,followSweep,followTick,killWallMax,headN,headSpike,spinMaxYaw");
     csv.Flush();
 }
 
@@ -478,7 +494,8 @@ static string CsvRow(PlayerResult r) =>
     $"{r.RecoilPull.ToString("F3", CultureInfo.InvariantCulture)},{r.RecoilRatio.ToString("F3", CultureInfo.InvariantCulture)}," +
     $"{r.Revisits},{r.MaxPeekDepth}," +
     $"{r.FollowMs.ToString("F0", CultureInfo.InvariantCulture)},{r.FollowSweep.ToString("F0", CultureInfo.InvariantCulture)},{r.FollowTick}," +
-    $"{r.KillWallMax.ToString("F5", CultureInfo.InvariantCulture)},{r.HeadN},{r.HeadSpike}";
+    $"{r.KillWallMax.ToString("F5", CultureInfo.InvariantCulture)},{r.HeadN},{r.HeadSpike}," +
+    $"{r.SpinMaxYaw.ToString("F0", CultureInfo.InvariantCulture)}";
 
 static string Csv(string s) => s.Contains(',') || s.Contains('"') ? $"\"{s.Replace("\"", "\"\"")}\"" : s;
 
@@ -579,6 +596,10 @@ static async Task<(List<PlayerResult> players, List<ShotRow> shots, List<KillRow
     var lastSpottedAt = new Dictionary<(int observer, int victim), float>();   // whole-round memory, beyond the 2s mask ring
     var headRows = new List<(int slot, float err)>();   // head-center aim error at fire, for the bone-lock floor
     var kills = new List<KillRow>();                    // per-kill components, exported via --kills
+    var spinMax = new Dictionary<int, float>();         // max SUSTAINED yaw rate (deg/s) — spinbot / auto-ban candidate
+    var spinRun = new Dictionary<int, int>();           // current consecutive-tick spin run length
+    var spinRunMin = new Dictionary<int, float>();      // min rate seen during the current run (its sustained floor)
+    var spinDir = new Dictionary<int, int>();           // sign of the current run's yaw direction
     var lastFire = new Dictionary<int, float>();
     var prevShot = new Dictionary<int, (float time, int target, ViewAngles angles)>();
     var shots = new List<ShotRow>();
@@ -1079,6 +1100,39 @@ static async Task<(List<PlayerResult> players, List<ShotRow> shots, List<KillRow
                 new ViewAngles(pw.EyeAngles.Pitch, pw.EyeAngles.Yaw, pw.EyeAngles.Roll),
                 Vector3.Zero, OnGround: true, Alive: p.PawnIsAlive));
 
+            // Spinbot: max SUSTAINED yaw rate (deg/s), guarded against the artifacts that fake a
+            // spin — angle wraparound, teleport/respawn/tick-gap. Only consecutive ticks (Δseq==1),
+            // alive, same rough position, and Δt in a sane tick range count; a run must last
+            // >=SpinRunTicks before its rate is recorded. This is the auto-ban-candidate axis, so it
+            // must never read a lag jump as 2000°/s. Whole-demo max survives the ring buffer.
+            if (p.PawnIsAlive && tr.Count >= 2)
+            {
+                var cur = tr[0]; var prev = tr[1];
+                float dt = cur.Time - prev.Time;
+                bool contiguous = cur.Sequence - prev.Sequence == 1 && dt > 0f && dt <= 0.05f
+                    && Vector3.Distance(cur.Origin, prev.Origin) < 200f; // no teleport/respawn
+                if (contiguous)
+                {
+                    float dyaw = cur.Angles.Yaw - prev.Angles.Yaw;
+                    dyaw -= 360f * MathF.Round(dyaw / 360f);            // unwrap 359->1
+                    float rate = MathF.Abs(dyaw) / dt;
+                    const float SpinFloor = 1200f;                     // deg/s; well above any human flick
+                    const int SpinRunTicks = 6;                        // sustained, not a momentary flick
+                    if (rate >= SpinFloor && MathF.Sign(dyaw) == (spinDir.GetValueOrDefault(s, 0) == 0 ? MathF.Sign(dyaw) : spinDir[s]))
+                    {
+                        spinDir[s] = (int)MathF.Sign(dyaw);
+                        int run = spinRun.GetValueOrDefault(s) + 1;
+                        spinRun[s] = run;
+                        float runMin = run == 1 ? rate : MathF.Min(spinRunMin.GetValueOrDefault(s, rate), rate);
+                        spinRunMin[s] = runMin;
+                        if (run >= SpinRunTicks && runMin > spinMax.GetValueOrDefault(s))
+                            spinMax[s] = runMin;   // the sustained floor of the run, not its peak
+                    }
+                    else { spinRun[s] = 0; spinDir[s] = 0; }
+                }
+                else { spinRun[s] = 0; spinDir[s] = 0; }
+            }
+
             // Pack this pawn's spotted mask (who has seen it) into the ring, keyed by sequence.
             ulong packed = 0UL;
             var sm = pw.EntitySpottedState?.SpottedByMask;
@@ -1452,6 +1506,7 @@ static async Task<(List<PlayerResult> players, List<ShotRow> shots, List<KillRow
         killWallMax.GetValueOrDefault(kv.Key),
         headRows.Count(r => r.slot == kv.Key),
         headRows.Count(r => r.slot == kv.Key && r.err <= 0.05f),
+        spinMax.GetValueOrDefault(kv.Key),
         signals.Where(s => s.Key.slot == kv.Key).ToDictionary(s => s.Key.detector, s => s.Value)))
         .ToList();
     return (playerRows, shots, kills);
@@ -1490,7 +1545,7 @@ internal sealed record PlayerResult(
     int Kills, float KillWall, float KillStill, float KillOnTgt,
     int RecoilSprays, float RecoilConsist, float RecoilPull, float RecoilRatio,
     int Revisits, int MaxPeekDepth, float FollowMs, float FollowSweep, int FollowTick,
-    float KillWallMax, int HeadN, int HeadSpike, Dictionary<string, int> Signals)
+    float KillWallMax, int HeadN, int HeadSpike, float SpinMaxYaw, Dictionary<string, int> Signals)
 {
     public string Detail =>
         Signals.Count > 0 ? string.Join(", ", Signals.Select(kv => $"{kv.Key}×{kv.Value}")) : "no signals";
