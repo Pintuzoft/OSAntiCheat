@@ -1049,8 +1049,20 @@ Fråga (ägarens): har vi allt CS:S/CS:GO-SourceMod hade? Nej — men det mesta 
       förutsägbart, tyst, osett) — exkludera som offer. Upptäckt: arkivets topp-hit var `-> X [Bot]`.
 
 ### Nivå 1 — Extension/bibliotek som redan existerar (installera/referera)
-- [ ] **[CS2TraceRay](https://github.com/schwarper/CS2TraceRay)** (NuGet): world-trace för CSSharp →
-      LIVE LOS + ljud-ocklusion + off-angle-geometri. Låser upp TODO:ns största tekniska risk.
+- [ ] **[CS2TraceRay](https://github.com/schwarper/CS2TraceRay)** (NuGet: `<PackageReference Include=
+      "CS2TraceRay" Version="1.0.8" />`) — **LIVE-PLUGIN-steg, huvudmålet.** Server-side world-trace,
+      entydigt detektor-sida (svarar "fri sikt A→B / vad träffar strålen"), inget klient-fusk. Låser upp
+      TODO:ns största tekniska risk. I pluginen:
+      - Ersätt `SpottedByMask`-proxyn (object-permanence-släp) med ÄKTA LOS: kan spelaren *faktiskt* se
+        hurtboxen nu → skärper deadaim/nolltest-grindarna live.
+      - Ljud-ocklusion: stråle fiende→lyssnare stoppad av geometri = dämpat → deadaims hörbarhets-grind
+        från fart-proxy till riktig utbredning (t_info).
+      - Off-angle live: raycasta vy mot väggen bakom → var pekar hen genom vilken geometri.
+      - ⚠️ Live-only (tracear körande world, ej demos) + signatur-beroende (kan brytas vid CS2-uppdatering).
+      **Relation demos↔live:** DemoReplay = KALIBRERING (läs basraten, sätt thresholds.json), pluginen =
+      PRODUKTEN (larma live med samma config). Demo-analysen är inte bonus — den är hur live blir
+      tröskel-tillförlitlig. Off-angle-baslinjen behöver ändå vpk-BVH (VRF) offline; CS2TraceRay är
+      live-motsvarigheten. Samma `thresholds.json` brygger båda.
 - [ ] **Offline-LOS för DemoReplay** via ren Source2-kartparsning: [ValveResourceFormat/Source2Viewer]
       (https://github.com/ValveResourceFormat/ValveResourceFormat) (MIT, SteamDatabase) extraherar
       kollisionsgeometri ur `.vpk` → bygg BVH → raycasta. Ger off-angle-baslinjen utan live-server
