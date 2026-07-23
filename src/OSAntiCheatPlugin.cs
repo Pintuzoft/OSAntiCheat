@@ -199,8 +199,46 @@ public sealed class OSAntiCheatPlugin : BasePlugin, IPluginConfig<OSAntiCheatCon
 
         var tracker = _tracking.For(attacker.Slot);
         if (tracker is not null)
-            Report(_spinbot, _spinbot.OnKill(tracker, @event.Headshot, Server.CurrentTime));
+        {
+            var signal = _spinbot.OnKill(tracker, @event.Headshot, Server.CurrentTime);
+            Report(_spinbot, signal);
+            if (signal is { } s) RespondToSpinbot(attacker, s); // confirmed spin+HS logic-breach
+        }
         return HookResult.Continue;
+    }
+
+    /// <summary>
+    /// Response to a CONFIRMED spinbot (spin+HS logic-breach). Always logs — durably, with what an
+    /// action WOULD have run — and only executes when explicitly armed (<see cref="OSAntiCheatConfig.AutoActionSpinbot"/>).
+    /// Default is dry-run: we never risk banning an innocent unseen; you watch the log first.
+    /// </summary>
+    private void RespondToSpinbot(CCSPlayerController suspect, Signal signal)
+    {
+        // Durable record first, always (this IS the product in dry-run mode).
+        _alerts?.LogSignal(signal, suspect.PlayerName, suspect.SteamID.ToString());
+
+        string cmd = string.IsNullOrWhiteSpace(Config.SpinbotActionCommand) ? "" :
+            Config.SpinbotActionCommand
+                .Replace("{slot}", suspect.Slot.ToString())
+                .Replace("{userid}", suspect.UserId?.ToString() ?? "")
+                .Replace("{steamid}", suspect.SteamID.ToString())
+                .Replace("{name}", suspect.PlayerName ?? "?");
+
+        if (Config.AutoActionSpinbot && cmd.Length > 0)
+        {
+            Logger.LogWarning("[OSAC] SPINBOT auto-action — {Name} ({SteamId}) running '{Cmd}' :: {Reason}",
+                suspect.PlayerName, suspect.SteamID, cmd, signal.Reason);
+            if (!string.IsNullOrEmpty(Config.SpinbotAnnounce))
+                Server.PrintToChatAll(Config.SpinbotAnnounce.Replace("{name}", suspect.PlayerName ?? "?"));
+            Server.ExecuteCommand(cmd);
+        }
+        else
+        {
+            // Dry-run (default): log what we WOULD do, act on nothing. Arm only after validating.
+            Logger.LogWarning("[OSAC] SPINBOT confirmed (DRY-RUN, no action taken) — {Name} ({SteamId}) " +
+                "would run '{Cmd}' :: {Reason}",
+                suspect.PlayerName, suspect.SteamID, cmd.Length > 0 ? cmd : "(no command configured)", signal.Reason);
+        }
     }
 
     private void PollSpinbot()

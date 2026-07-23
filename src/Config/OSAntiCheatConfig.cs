@@ -65,6 +65,26 @@ public sealed class OSAntiCheatConfig : BasePluginConfig
     public bool EnableSpinbot { get; set; } = true;
 
     /// <summary>
+    /// Whether to actually EXECUTE the action on a confirmed spinbot. Default false = DRY-RUN: a
+    /// confirmed spin+HS logic-breach is always LOGGED (including what it *would* have run), but nothing
+    /// is executed. Watch the log; once you've confirmed it only ever fires on real spinbots, set true
+    /// to arm it. This is the one irreversible action — we never risk banning an innocent unseen. Only
+    /// ever triggers on the beyond-human spin+HS signal, never the probabilistic axes. Loud response is
+    /// fine here — a spinbot hides nothing, so an announce leaks no game-state.
+    /// </summary>
+    [JsonPropertyName("AutoActionSpinbot")]
+    public bool AutoActionSpinbot { get; set; } = false;
+
+    /// <summary>
+    /// Command run on a confirmed spinbot. Placeholders: {slot} {userid} {steamid} {name}. Empty = log
+    /// only (no action). Wire it to your ban system, e.g. "css_ban {steamid} 0 spinbot" or "kickid {userid}".
+    /// </summary>
+    public string SpinbotActionCommand { get; set; } = "";
+
+    /// <summary>Optional public chat announce on a confirmed spinbot. {name} substituted. Empty = silent.</summary>
+    public string SpinbotAnnounce { get; set; } = "";
+
+    /// <summary>
     /// Bone-lock aimbot: repeated head-CENTRE locks tighter than a human hand. A LOGIC-BREACH axis
     /// (beyond-human), validated skill-invariant vs tier-1 pros. On by default; the two knobs below
     /// set what counts as a lock and how many repeats before it speaks.
