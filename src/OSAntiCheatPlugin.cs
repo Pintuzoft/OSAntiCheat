@@ -36,6 +36,7 @@ public sealed class OSAntiCheatPlugin : BasePlugin, IPluginConfig<OSAntiCheatCon
     private TriggerbotDetector _triggerbot = new();
     private SpinbotDetector _spinbot = new();
     private BoneLockDetector _boneLock = new();
+    private RecoilDetector _recoil = new();
     private WallhackDetector _wallhack = new();
     private WallhackGazeDetector _wallhackGaze = new();
     private NullTestDetector _nullTest = new();
@@ -67,6 +68,7 @@ public sealed class OSAntiCheatPlugin : BasePlugin, IPluginConfig<OSAntiCheatCon
         _spinbot = new SpinbotDetector(config.SpinbotMinRateDegPerSec);
         // (SpinbotMinRateDegPerSec is the per-tick spin floor; the continuous-turn + spin-HS gates are internal.)
         _boneLock = new BoneLockDetector(config.BoneLockSpikeDeg, config.BoneLockMinSpikes);
+        _recoil = new RecoilDetector(config.RecoilMaxRatio, config.RecoilMinSprays);
         _wallhack = new WallhackDetector(
             config.WallhackMinTrackSeconds, config.WallhackMinEnemyMoveUnits,
             config.WallhackMinBearingChangeDeg, config.WallhackFollowFraction,
@@ -85,7 +87,7 @@ public sealed class OSAntiCheatPlugin : BasePlugin, IPluginConfig<OSAntiCheatCon
         // Map each detector to its response class so an alert can be labelled by the highest tier
         // that contributed (a LogicBreach signal makes the whole alert "beyond human").
         foreach (IDetector d in new IDetector[]
-                 { _aimbot, _triggerbot, _spinbot, _boneLock, _wallhack, _wallhackGaze, _nullTest })
+                 { _aimbot, _triggerbot, _spinbot, _boneLock, _recoil, _wallhack, _wallhackGaze, _nullTest })
             _detectorKinds[d.Id] = d.Kind;
 
         Logger.LogInformation(
@@ -134,6 +136,7 @@ public sealed class OSAntiCheatPlugin : BasePlugin, IPluginConfig<OSAntiCheatCon
                 _triggerbot.Remove(player.Slot);
                 _spinbot.Remove(player.Slot);
                 _boneLock.Remove(player.Slot);
+                _recoil.Remove(player.Slot);
                 _wallhack.Remove(player.Slot);
                 _wallhackGaze.Remove(player.Slot);
                 _nullTest.Remove(player.Slot);
@@ -186,6 +189,10 @@ public sealed class OSAntiCheatPlugin : BasePlugin, IPluginConfig<OSAntiCheatCon
         // others; the detector applies its own degenerate-range guard and repetition gate.
         if (Config.EnableBoneLock && !burstContinuation)
             Report(_boneLock, _boneLock.OnFire(shooterTracker, enemies, now));
+
+        // Anti-recoil: fold EVERY shot into the spray (not first-of-burst — the whole curve matters).
+        if (Config.EnableRecoil)
+            Report(_recoil, _recoil.OnFire(shooterTracker, @event.Weapon ?? "", now));
 
         return HookResult.Continue;
     }

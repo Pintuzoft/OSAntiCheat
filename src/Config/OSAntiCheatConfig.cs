@@ -98,6 +98,20 @@ public sealed class OSAntiCheatConfig : BasePluginConfig
     /// <summary>Repeated locks required before flagging — one exact hit is chance (~0.2%), never a lock.</summary>
     public int BoneLockMinSpikes { get; set; } = 3;
 
+    /// <summary>
+    /// Anti-recoil (script/macro/firmware): recoil compensation too consistent to be human. A
+    /// LOGIC-BREACH axis — the human floor is ratio ~0.06 (17k archive sprays), so the threshold below
+    /// sits in the gap under any human. Narrow (misses humanised scripts) but never false-positives.
+    /// </summary>
+    [JsonPropertyName("EnableRecoil")]
+    public bool EnableRecoil { get; set; } = true;
+
+    /// <summary>Recoil consistency ratio below which it's a machine. Human floor ~0.06; default 0.04.</summary>
+    public float RecoilMaxRatio { get; set; } = 0.04f;
+
+    /// <summary>Sprays of one weapon required before judging — a stable estimate, not one lucky spray.</summary>
+    public int RecoilMinSprays { get; set; } = 4;
+
     [JsonPropertyName("EnableWallhack")]
     public bool EnableWallhack { get; set; } = true;
 
