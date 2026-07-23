@@ -379,22 +379,34 @@ if (recoilResults.Count > 0)
         foreach (var k in gatedTop.Where(k => k.gated >= 0.05f).OrderByDescending(k => k.gated).Take(30))
             Console.WriteLine($"    {k.gated,6:F3}  (raw {k.sig:F3})  {k.att,-20} -> {k.vict,-16} {k.weap,-10} r{k.round} tick {k.tick}  [{k.demo}]");
     }
-    // === DETECTIONS: what fires at the configured thresholds. The tuning loop: raise a knob
-    // until known-legit players go quiet, and that calibrated file ports to the live plugin. ===
+    // === DETECTIONS, split by response TIER (the owner's principle: scream only at the impossible,
+    // whisper about the improbable). Tuning loop: raise a knob until known-legit go quiet; the
+    // calibrated file ports to the live plugin, which honours the same two tiers. ===
     Console.WriteLine($"\n=== DETECTIONS (config: {configPath ?? "defaults"}) ===");
     Console.WriteLine($"  knobs: deadaim>={cfg.DeadaimMin:F3}  boneLockSpikes>={cfg.BoneLockMinSpikes}  " +
                       $"antiRecoil<={cfg.AntiRecoilMaxRatio:F3} (>={cfg.AntiRecoilMinSprays} sprays)  " +
                       $"nullTestExcess>={cfg.NullTestMinExcess:P1} (n>={cfg.NullTestMinSamples})");
-    int hits = 0;
-    foreach (var k in gatedTop.Where(k => k.gated >= cfg.DeadaimMin).OrderByDescending(k => k.gated))
-    { hits++; Console.WriteLine($"  [deadaim]     {k.gated,6:F3}  {k.att,-20} -> {k.vict,-16} {k.weap,-10} r{k.round} tick {k.tick}  [{k.demo}]"); }
+
+    // TIER 1 — LOGIC BREACH: mechanical impossibility (the hand physically cannot). High confidence,
+    // auto-action-ELIGIBLE (still a human confirms before a ban in v1). These are the concrete-wall
+    // axes: a cheater falls BELOW the human floor, never rises to the top of it.
+    Console.WriteLine("\n  -- TIER 1: LOGIC BREACH (beyond-human — the hand can't do this) --");
+    int t1 = 0;
     foreach (var h in headSpikers.OrderByDescending(h => h.spike))
-    { hits++; Console.WriteLine($"  [bone-lock]   spike {h.spike}/{h.n}  {h.name,-20} {h.id}  [{h.demo}]"); }
+    { t1++; Console.WriteLine($"  [bone-lock]   spike {h.spike}/{h.n}  {h.name,-20} {h.id}  [{h.demo}]"); }
     foreach (var r in recoilResults.Where(r => r.ratio <= cfg.AntiRecoilMaxRatio && r.sprays >= cfg.AntiRecoilMinSprays).OrderBy(r => r.ratio))
-    { hits++; Console.WriteLine($"  [anti-recoil] ratio {r.ratio:F3} over {r.sprays} sprays  {r.name,-20} {r.id}  [{r.demo}]"); }
+    { t1++; Console.WriteLine($"  [anti-recoil] ratio {r.ratio:F3} over {r.sprays} sprays  {r.name,-20} {r.id}  [{r.demo}]"); }
+    if (t1 == 0) Console.WriteLine("     (none — machine zone empty)");
+
+    // TIER 2 — REVIEW FLAG: improbable, never impossible (a human COULD have; a lucky hold, a great
+    // read). Never auto-action. Produces a clip; a human judges; repetition is the discriminator.
+    Console.WriteLine("\n  -- TIER 2: REVIEW FLAG (improbable — a human COULD, but should we look?) --");
+    int t2 = 0;
+    foreach (var k in gatedTop.Where(k => k.gated >= cfg.DeadaimMin).OrderByDescending(k => k.gated))
+    { t2++; Console.WriteLine($"  [deadaim]     {k.gated,6:F3}  {k.att,-20} -> {k.vict,-16} {k.weap,-10} r{k.round} tick {k.tick}  [{k.demo}]"); }
     foreach (var n in nullTestHits.OrderByDescending(n => n.excess))
-    { hits++; Console.WriteLine($"  [null-test]   excess {n.excess:P1} (n={n.n})  {n.name,-20} {n.id}  [{n.demo}]"); }
-    if (hits == 0) Console.WriteLine("  (no detections at these thresholds)");
+    { t2++; Console.WriteLine($"  [null-test]   excess {n.excess:P1} (n={n.n})  {n.name,-20} {n.id}  [{n.demo}]"); }
+    if (t2 == 0) Console.WriteLine("     (none at these thresholds)");
 
     Console.WriteLine($"\nRecoil ratio (spread/pull; lower = more machine-like) over {recoilResults.Count} sessions (>=4 sprays):");
     foreach (var q in new[] { 0.01, 0.05, 0.10, 0.50, 0.90 })
