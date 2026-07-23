@@ -9,8 +9,11 @@ usage: report.py --players archive.csv --kills archive-kills.csv [--config thres
 """
 import argparse, csv, json, sys
 
+SCOPED = {"awp", "ssg08", "sg556", "aug", "scar20", "g3sg1"}
+
 DEFAULTS = {
     "deadaimMin": 0.05,
+    "deadaimMinScoped": 0.30,
     "boneLockMinSpikes": 2,
     "antiRecoilMaxRatio": 0.04,
     "antiRecoilMinSprays": 6,
@@ -41,7 +44,9 @@ def main():
             for r in csv.DictReader(f):
                 g = float(r["gatedSig"])
                 gated_all.append(g)
-                if g >= cfg["deadaimMin"]:
+                # Scoping stills the crosshair for free, so the stillness axis carries no
+                # information for sniper holds — they get their own (much higher) knob.
+                if g >= (cfg["deadaimMinScoped"] if r["weapon"] in SCOPED else cfg["deadaimMin"]):
                     hits["deadaim"].append((g, f'{r["attackerName"]} -> {r["victimName"]}  '
                         f'{r["weapon"]} r{r["round"]} tick {r["tick"]}  [{r["demo"]}]  (raw {r["sig"]})'))
 
