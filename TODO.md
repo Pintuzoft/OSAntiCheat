@@ -1031,3 +1031,40 @@ HLTV är Cloudflare-blockerat från sandboxen; bo3.gg:s demos bakom inlogg.)
       "fångar de lata"-tiern + varians-backstopp (för-tight fördelning self-normaliserat) för resten.
 - [ ] Efter arkiv-golvet: wire:a som **andra bortom-mänskligt-auto-axeln** (efter anti-recoil <0,04):
       spike-andel över tröskel = "trolig bone-lock aimbot", typad ledtråd + klipp, aldrig på ett skott.
+
+## Data-inventering (2026-07-23): vad servern kan ge som vi inte tar
+
+Fråga (ägarens): har vi allt CS:S/CS:GO-SourceMod hade? Nej — men det mesta av gapet går att stänga.
+
+### Nivå 0 — FINNS REDAN i CS2/CSSharp/demos, oanvänt (gratis, börja här)
+- [ ] **`bullet_impact`-eventet**: skottvektor (öga→nedslag) vs eye-vinkel = **silent-aim-detektorn**
+      (TODO:ns gamla feasibility-fråga troligen redan löst). Finns i demos → retroaktivt testbar.
+- [ ] **`player_footstep`-eventet**: RIKTIG hörbarhet i stället för fart-proxyn (deadaims ljud-grind
+      blir exakt: fanns fotstegs-event eller ej). Finns i demos → retroaktivt testbar.
+- [ ] **`m_flFlashDuration`**: flashad-accuracy-axeln — pricka någon MEDAN flashad = klassisk tell (SMAC).
+- [ ] **`m_aimPunchAngle` + `m_iShotsFired`**: exakt recoil-ground-truth till anti-recoil-axeln.
+- [ ] **`m_vecViewOffset`**: crouch-korrekt huvudhöjd → skarpare bone-lock (feet+64 mäter fel på hukande).
+- [ ] **Smoke-projektil-entities** (pos+radie): genom-rök-grinden automatiskt (George-fallet ögonvittnades).
+- [ ] **Bot-flagga på offer**: bot-övertagna offer (t.ex. disconnect-bots) är deadaim-bete (vandrar
+      förutsägbart, tyst, osett) — exkludera som offer. Upptäckt: arkivets topp-hit var `-> X [Bot]`.
+
+### Nivå 1 — Extension/bibliotek som redan existerar (installera/referera)
+- [ ] **[CS2TraceRay](https://github.com/schwarper/CS2TraceRay)** (NuGet): world-trace för CSSharp →
+      LIVE LOS + ljud-ocklusion + off-angle-geometri. Låser upp TODO:ns största tekniska risk.
+- [ ] **[ExternalAutoWallCS2](https://github.com/Read1dno/ExternalAutoWallCS2)**-metoden: extrahera
+      kollisionsgeometri ur `.vpk` + egen BVH-raycast = **OFFLINE-LOS för DemoReplay** — det är vägen
+      till off-angle-baslinjen utan live-server (arkivet kan geometri-analyseras retroaktivt!).
+
+### Nivå 2 — Kräver hook-arbete (usercmd/subtick — största vinsten, mest jobb)
+Source1:s `OnPlayerRunCmd` (rå per-command: knappar, vinklar, tickcount) var klassiska AC:ers ryggrad
+(silent-aim/psilent, command-nivå-trigger, backtrack-detektion). CS2:s protokoll är RIKARE (subtick =
+**ms-tidsstämplade inputs** → trigger/reaction-axeln 1ms-upplöst i stället för 15,6ms) men CSSharp
+exponerar det inte färdigt. Vägar: (a) CSSharp:s gamedata-signaturer + MemoryFunction-hooks från C#
+(så CS2TraceRay funkar internt; signaturer bryts vid CS2-uppdateringar), (b) liten C++-metamod-kompanjon
+(CS2Fixes-stil) som matar CSSharp, (c) PR till CSSharp uppströms (bidrag > ask; hela AC-communityt vill ha).
+- [ ] Inventera aktuell CSSharp-API/issues först — delar kan ha landat efter vårt kunskapsläge.
+
+**Prioritet:** Nivå 0-freebies först (footstep + bullet_impact är demo-testbara utan serverändring) →
+CS2TraceRay live + vpk-BVH offline → usercmd/subtick sist. Axel-mappning: usercmd/subtick matar
+MEKANIK-cirkeln (trigger, silent-aim, recoil); trace/geometri matar INFORMATIONS-cirkeln (LOS, ljud,
+off-angle) — båda Venn-halvorna får förstärkning.
