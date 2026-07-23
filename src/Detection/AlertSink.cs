@@ -23,13 +23,15 @@ public sealed class AlertSink
     }
 
     /// <summary>Append one raw detector signal (below alert level) for calibration analysis.</summary>
-    public void LogSignal(Signal signal, string? playerName, string? steamId)
+    public void LogSignal(Signal signal, string? playerName, string? steamId, string? map = null)
     {
         var record = new
         {
             type = "signal",
+            wallClock = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss"), // resolves WHICH demo (map + date)
+            map,                  // Server.MapName — the demo is for this map at this wall-clock
             time = signal.Time,
-            tick = signal.Tick,   // demo_gototick target for the reviewer
+            tick = signal.Tick,   // demo_gototick target for the reviewer, once the demo is found
             detector = signal.Detector,
             slot = signal.PlayerSlot,
             name = playerName,

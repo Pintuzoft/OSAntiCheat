@@ -222,7 +222,7 @@ public sealed class OSAntiCheatPlugin : BasePlugin, IPluginConfig<OSAntiCheatCon
     private void RespondToSpinbot(CCSPlayerController suspect, Signal signal)
     {
         // Durable record first, always (this IS the product in dry-run mode).
-        _alerts?.LogSignal(signal, suspect.PlayerName, suspect.SteamID.ToString());
+        _alerts?.LogSignal(signal, suspect.PlayerName, suspect.SteamID.ToString(), Server.MapName);
 
         string cmd = string.IsNullOrWhiteSpace(Config.SpinbotActionCommand) ? "" :
             Config.SpinbotActionCommand
@@ -364,7 +364,7 @@ public sealed class OSAntiCheatPlugin : BasePlugin, IPluginConfig<OSAntiCheatCon
         if (shadow || Config.LogAllSignals)
         {
             var p = Utilities.GetPlayerFromSlot(s.PlayerSlot);
-            _alerts?.LogSignal(s, p?.PlayerName, p?.SteamID.ToString());
+            _alerts?.LogSignal(s, p?.PlayerName, p?.SteamID.ToString(), Server.MapName);
         }
 
         if (shadow) return;              // observe-only: never fuse or alert
