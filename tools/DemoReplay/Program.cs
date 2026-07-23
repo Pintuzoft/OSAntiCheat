@@ -665,6 +665,10 @@ static async Task<(List<PlayerResult> players, List<ShotRow> shots, List<KillRow
                                               // taser/eco standoff (both waiting either side of a wall) is
                                               // near-stationary, and instantaneous speed false-positives on
                                               // its tiny shifts. Net displacement kills that.
+    const float FollowMinSweep = 30f;    // and the BEARING must have swept this far — the enemy moved
+                                         // laterally across the view and the aim TRACKED it. A radial
+                                         // approach (enemy walks toward you) sweeps ~0° despite moving
+                                         // 300u+: that's a held angle, not a follow. The name earns its keep.
 
     void FlushSpray(int s)
     {
@@ -685,7 +689,17 @@ static async Task<(List<PlayerResult> players, List<ShotRow> shots, List<KillRow
     float roundStartTime = 0f;
     int roundNumber = 0;
     float Now() => demo.CurrentDemoTick.Value / (float)Math.Max(1, CsDemoParser.TickRate);
-    demo.Source1GameEvents.RoundStart += _ => { roundStartTime = Now(); roundNumber++; };
+    demo.Source1GameEvents.RoundStart += _ =>
+    {
+        roundStartTime = Now();
+        roundNumber++;
+        // Reset per-episode state at round start (owner's point): a revisit/follow is a WITHIN-round
+        // episode. Without this the state machines can bridge a park in one round to a re-park in a
+        // later one and tape unrelated moments into one bogus multi-minute "episode".
+        revisitState.Clear();
+        followState.Clear();
+        followStartPos.Clear();
+    };
 
     void Report(IDetector detector, Signal? signal)
     {
@@ -1315,7 +1329,13 @@ static async Task<(List<PlayerResult> players, List<ShotRow> shots, List<KillRow
                     {
                         float dur = (fs.lastTime - fs.start) * 1000f;
                         float disp = Vector3.Distance(feet, followStartPos.GetValueOrDefault(fk));   // net enemy movement
-                        if (dur >= FollowMinMs && disp >= FollowMinDisplacement && dur > maxFollowMs.GetValueOrDefault(slot))
+                        // A detector called "follow" must require FOLLOWING: the enemy's BEARING has
+                        // to have swept across the view (lateral movement the aim had to track), not
+                        // just net displacement. A standoff / radial approach (enemy walks toward you
+                        // along the sightline) moves >300u but sweeps ~0° — you held a static angle,
+                        // you didn't follow. Sweep is what pre-aim/holds can't fake.
+                        if (dur >= FollowMinMs && disp >= FollowMinDisplacement &&
+                            fs.swept >= FollowMinSweep && dur > maxFollowMs.GetValueOrDefault(slot))
                         {
                             maxFollowMs[slot] = dur; maxFollowSweep[slot] = fs.swept; maxFollowTick[slot] = fs.startTick;
                             if (revisitTarget != 0 && steamIds.GetValueOrDefault(slot) == revisitTarget)
