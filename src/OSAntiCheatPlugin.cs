@@ -350,6 +350,12 @@ public sealed class OSAntiCheatPlugin : BasePlugin, IPluginConfig<OSAntiCheatCon
     {
         if (signal is not { } s) return;
 
+        // Stamp the server tick centrally so every logged signal carries a demo_gototick target — the
+        // reviewer parses the recorded demo and jumps straight to the moment. Approx = time × tickrate
+        // (seconds since map start ≈ demo tick when the server records from map start); refine to the
+        // exact engine tick if it drifts against a real demo.
+        s = s with { Tick = (int)MathF.Round(Server.CurrentTime * 64f) };
+
         // Shadow detectors run + LOG (we collect what they'd fire on) but never fuse — so a falsified
         // axis gathers data without polluting the score or raising an alert.
         bool shadow = Config.ShadowDetectors is { } sh && Array.IndexOf(sh, detector.Id) >= 0;

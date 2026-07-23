@@ -29,6 +29,7 @@ public sealed class AlertSink
         {
             type = "signal",
             time = signal.Time,
+            tick = signal.Tick,   // demo_gototick target for the reviewer
             detector = signal.Detector,
             slot = signal.PlayerSlot,
             name = playerName,
@@ -69,6 +70,7 @@ public sealed class AlertSink
                 s.Detector,
                 s.Confidence,
                 s.Time,
+                s.Tick,
                 s.Reason,
             }),
         };

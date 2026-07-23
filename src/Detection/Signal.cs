@@ -12,4 +12,5 @@ public readonly record struct Signal(
     int PlayerSlot,
     float Time,        // server time (seconds) the signal was raised
     float Confidence,  // 0..1
-    string Reason);
+    string Reason,
+    int Tick = 0);     // server tick — stamped centrally so a reviewer can demo_gototick to the moment
