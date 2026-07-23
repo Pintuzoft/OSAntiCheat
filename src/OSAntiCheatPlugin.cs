@@ -350,13 +350,18 @@ public sealed class OSAntiCheatPlugin : BasePlugin, IPluginConfig<OSAntiCheatCon
     {
         if (signal is not { } s) return;
 
-        // Log every raw signal (for calibration) before fusing it into the score.
-        if (Config.LogAllSignals)
+        // Shadow detectors run + LOG (we collect what they'd fire on) but never fuse — so a falsified
+        // axis gathers data without polluting the score or raising an alert.
+        bool shadow = Config.ShadowDetectors is { } sh && Array.IndexOf(sh, detector.Id) >= 0;
+
+        // Log every raw signal (always for shadow detectors; otherwise when LogAllSignals is on).
+        if (shadow || Config.LogAllSignals)
         {
             var p = Utilities.GetPlayerFromSlot(s.PlayerSlot);
             _alerts?.LogSignal(s, p?.PlayerName, p?.SteamID.ToString());
         }
 
+        if (shadow) return;              // observe-only: never fuse or alert
         _engine.Report(s, detector.Weight);
     }
 

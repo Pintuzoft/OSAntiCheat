@@ -65,6 +65,17 @@ public sealed class OSAntiCheatConfig : BasePluginConfig
     public bool EnableSpinbot { get; set; } = true;
 
     /// <summary>
+    /// Detectors that run in SHADOW mode: they still compute and LOG every raw signal (so we collect
+    /// what they would fire on, for later analysis / a future model), but never fuse into the suspicion
+    /// score or trigger an alert. Better than disabling — a muted detector gathers no data; a shadowed
+    /// one gathers everything without polluting the score. Default = the falsified/unvalidated axes.
+    /// </summary>
+    public string[] ShadowDetectors { get; set; } =
+    {
+        "wallhack.track", "wallhack.gaze", "aimbot.sweep", "triggerbot", "wallhack.nulltest",
+    };
+
+    /// <summary>
     /// Whether to actually EXECUTE the action on a confirmed spinbot. Default false = DRY-RUN: a
     /// confirmed spin+HS logic-breach is always LOGGED (including what it *would* have run), but nothing
     /// is executed. Watch the log; once you've confirmed it only ever fires on real spinbots, set true
