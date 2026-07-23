@@ -937,6 +937,13 @@ static async Task<(List<PlayerResult> players, List<ShotRow> shots, List<KillRow
         }
         if (nearestId < 0) return;
 
+        // Degenerate-range guard: stacked/point-blank targets (noclip horseplay, spawn stacking)
+        // make every angular metric meaningless — AimErrorTo collapses to exactly 0 at ~zero
+        // distance, which is how one workshop session produced 11/11 fake bone-lock spikes and
+        // saturated dwell. No aim measurement below 64u (~1.2m).
+        if (trackers.TryGetValue(nearestId, out var nearTr) && nearTr.TryLatest(out var nearS) &&
+            Vector3.Distance(atFire.Origin, nearS.Origin) < 64f) return;
+
         // Reaction timing: only first-of-burst shots that actually landed near a target count as a
         // "decision", and only when the target is CURRENTLY seen with a recent unseen->seen edge in
         // the buffer. No edge within ~1.5s = ongoing engagement (or never seen), not an appearance.
