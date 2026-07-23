@@ -223,7 +223,7 @@ if (csvPath is not null)
     // (resume granularity is a whole demo anyway), thousands of times fewer syscalls.
     csv = new StreamWriter(csvPath, append: true) { AutoFlush = false };
     // aliveMinutes is the exposure: without it you cannot compute a rate or a Poisson baseline.
-    if (fresh) csv.WriteLine("demo,steamId,name,peakScore,aliveMinutes,wallhackTrack,aimbotSweep,triggerbot,shots,hits,headshots,unseenSamples,unseenNow,unseenPast,kills,killWall,killStill,killOnTgt,recoilSprays,recoilConsist,recoilPull,recoilRatio,revisits,maxPeekDepth,followMs,followSweep,followTick,killWallMax,headN,headSpike,spinMaxYaw");
+    if (fresh) csv.WriteLine("demo,steamId,name,peakScore,aliveMinutes,wallhackTrack,aimbotSweep,triggerbot,shots,hits,headshots,unseenSamples,unseenNow,unseenPast,kills,killWall,killStill,killOnTgt,recoilSprays,recoilConsist,recoilPull,recoilRatio,revisits,maxPeekDepth,followMs,followSweep,followTick,killWallMax,headN,headSpike,spinMaxYaw,spinHits");
     csv.Flush();
 }
 
@@ -495,7 +495,7 @@ static string CsvRow(PlayerResult r) =>
     $"{r.Revisits},{r.MaxPeekDepth}," +
     $"{r.FollowMs.ToString("F0", CultureInfo.InvariantCulture)},{r.FollowSweep.ToString("F0", CultureInfo.InvariantCulture)},{r.FollowTick}," +
     $"{r.KillWallMax.ToString("F5", CultureInfo.InvariantCulture)},{r.HeadN},{r.HeadSpike}," +
-    $"{r.SpinMaxYaw.ToString("F0", CultureInfo.InvariantCulture)}";
+    $"{r.SpinMaxYaw.ToString("F0", CultureInfo.InvariantCulture)},{r.SpinHits}";
 
 static string Csv(string s) => s.Contains(',') || s.Contains('"') ? $"\"{s.Replace("\"", "\"\"")}\"" : s;
 
@@ -596,7 +596,8 @@ static async Task<(List<PlayerResult> players, List<ShotRow> shots, List<KillRow
     var lastSpottedAt = new Dictionary<(int observer, int victim), float>();   // whole-round memory, beyond the 2s mask ring
     var headRows = new List<(int slot, float err)>();   // head-center aim error at fire, for the bone-lock floor
     var kills = new List<KillRow>();                    // per-kill components, exported via --kills
-    var spinMax = new Dictionary<int, float>();         // max SUSTAINED yaw rate (deg/s) — spinbot / auto-ban candidate
+    var spinMax = new Dictionary<int, float>();         // max SUSTAINED yaw rate (deg/s) — raw, gradient alone
+    var spinHits = new Dictionary<int, int>();          // shots on-body (<=2°) while spinning (>1000°/s) — the real spinbot tell
     var spinRun = new Dictionary<int, int>();           // current consecutive-tick spin run length
     var spinRunMin = new Dictionary<int, float>();      // min rate seen during the current run (its sustained floor)
     var spinDir = new Dictionary<int, int>();           // sign of the current run's yaw direction
@@ -1067,6 +1068,14 @@ static async Task<(List<PlayerResult> players, List<ShotRow> shots, List<KillRow
             headRows.Add((slot, headErr));
         }
 
+        // Spinbot signature (owner's insight): a HIT while SPINNING. A human warmup-360 sweeps the
+        // crosshair 15°+/tick and can't place a shot on a body mid-spin; a spinbot's aim is decoupled
+        // from the spin, so it fires on-body while the view whirls. Count shots with spinbot-level yaw
+        // rate AND the crosshair on an enemy (<=2°). Rate ALONE was a gradient (regulars hit 10000°/s
+        // in flicks); rate × on-body is the hard edge — they spin fast but don't hit while doing it.
+        if (viewRate >= 1000f && nearestErr <= 2f)
+            spinHits[slot] = spinHits.GetValueOrDefault(slot) + 1;
+
         shots.Add(new ShotRow(
             steamIds.GetValueOrDefault(slot), names.GetValueOrDefault(slot, "?"),
             nearestErr, fromTarget >= 0 ? switchMs : -1f, fromTarget >= 0 ? switchDeg : -1f,
@@ -1507,6 +1516,7 @@ static async Task<(List<PlayerResult> players, List<ShotRow> shots, List<KillRow
         headRows.Count(r => r.slot == kv.Key),
         headRows.Count(r => r.slot == kv.Key && r.err <= 0.05f),
         spinMax.GetValueOrDefault(kv.Key),
+        spinHits.GetValueOrDefault(kv.Key),
         signals.Where(s => s.Key.slot == kv.Key).ToDictionary(s => s.Key.detector, s => s.Value)))
         .ToList();
     return (playerRows, shots, kills);
@@ -1545,7 +1555,7 @@ internal sealed record PlayerResult(
     int Kills, float KillWall, float KillStill, float KillOnTgt,
     int RecoilSprays, float RecoilConsist, float RecoilPull, float RecoilRatio,
     int Revisits, int MaxPeekDepth, float FollowMs, float FollowSweep, int FollowTick,
-    float KillWallMax, int HeadN, int HeadSpike, float SpinMaxYaw, Dictionary<string, int> Signals)
+    float KillWallMax, int HeadN, int HeadSpike, float SpinMaxYaw, int SpinHits, Dictionary<string, int> Signals)
 {
     public string Detail =>
         Signals.Count > 0 ? string.Join(", ", Signals.Select(kv => $"{kv.Key}×{kv.Value}")) : "no signals";
