@@ -741,17 +741,15 @@ static async Task<(List<PlayerResult> players, List<ShotRow> shots, List<KillRow
         if (aSlot < 0 || vSlot < 0) return;
         if (!trackers.TryGetValue(aSlot, out var aTr) || !trackers.TryGetValue(vSlot, out var vTr)) return;
 
-        // Spinbot's real signature (owner): a HEADSHOT KILL landed while the killer is SPINNING —
-        // constant spin + HS on HS. Warmup-360s don't produce HS kills; a spinbot's decoupled aim
-        // headshots mid-whirl, repeatedly. Yaw rate at the kill tick from the two latest samples.
-        if (e.Headshot && aTr.Count >= 2)
-        {
-            var k0 = aTr[0]; var k1 = aTr[1];
-            float kdt = k0.Time - k1.Time;
-            if (k0.Sequence - k1.Sequence == 1 && kdt > 0f &&
-                Geometry.AngleBetween(k1.Angles, k0.Angles) / kdt >= 1000f)
-                spinHsKills[aSlot] = spinHsKills.GetValueOrDefault(aSlot) + 1;
-        }
+        // Spinbot's real signature (owner): a HEADSHOT KILL landed during a SUSTAINED spin — constant
+        // spin + HS on HS. NOT the instantaneous rate at the kill tick: a human 180-flick is ~1200°/s
+        // but lasts 1-2 ticks and STOPS on the target (the false-positive that flagged MrJozk landing a
+        // HS off a flick). A spinbot's yaw never stops. spinRun is the current CONTINUOUS-spin length
+        // (>1200°/s, same direction); requiring it >= SpinRunTicks means the killer was mid-whirl, not
+        // mid-flick. Ties spinHsKills to the same sustained-spin gate as spinMaxYaw — so maxYaw==0
+        // (never sustained a spin) now implies spinHsKills==0, which zeroes all three prior FPs.
+        if (e.Headshot && spinRun.GetValueOrDefault(aSlot) >= 6)
+            spinHsKills[aSlot] = spinHsKills.GetValueOrDefault(aSlot) + 1;
 
         // ~1s of run-up at 64 tick, but only the ticks where the attacker could NOT see the victim.
         // A normal visible fight has the victim spotted, so it contributes nothing; a kill that was
