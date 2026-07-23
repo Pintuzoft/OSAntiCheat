@@ -19,13 +19,17 @@ namespace OSAntiCheat;
 ///
 /// Server-side, heuristic anticheat: we only observe what the server sees (positions,
 /// view angles, shots, timing). Detectors measure independent axes; the fusion engine
-/// triangulates them into a per-player suspicion score. v1 response is log + admin notice
-/// only — never auto kick/ban. See TODO.md for the roadmap.
+/// triangulates them into a per-player suspicion score, split into two response tiers:
+/// LOGIC-BREACH (beyond-human: spinbot, bone-lock, anti-recoil — auto-action-eligible) and
+/// REVIEW (improbable: human-judged, never auto). Auto-action is OFF by default (dry-run: a
+/// confirmed spinbot is logged, not banned) and only ever the logic-breach axes can reach it.
+/// Every signal logs tick + map + wall-clock so a reviewer can find the demo and the moment.
+/// See TODO.md for the roadmap. UNTESTED ON A LIVE SERVER as of this release.
 /// </summary>
 public sealed class OSAntiCheatPlugin : BasePlugin, IPluginConfig<OSAntiCheatConfig>
 {
     public override string ModuleName => "OSAntiCheat";
-    public override string ModuleVersion => "0.6.1";
+    public override string ModuleVersion => "0.7.0";
     public override string ModuleAuthor => "DreamHealer";
     public override string ModuleDescription => "Server-side heuristic anticheat for CS2";
 
