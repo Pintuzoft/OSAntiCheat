@@ -602,6 +602,7 @@ static async Task<(List<PlayerResult> players, List<ShotRow> shots, List<KillRow
     var spinRun = new Dictionary<int, int>();           // current consecutive-tick spin run length
     var spinRunMin = new Dictionary<int, float>();      // min rate seen during the current run (its sustained floor)
     var spinDir = new Dictionary<int, int>();           // sign of the current run's yaw direction
+    var spinSwept = new Dictionary<int, float>();       // total degrees rotated in the current continuous run
     var lastFire = new Dictionary<int, float>();
     var prevShot = new Dictionary<int, (float time, int target, ViewAngles angles)>();
     var shots = new List<ShotRow>();
@@ -741,14 +742,12 @@ static async Task<(List<PlayerResult> players, List<ShotRow> shots, List<KillRow
         if (aSlot < 0 || vSlot < 0) return;
         if (!trackers.TryGetValue(aSlot, out var aTr) || !trackers.TryGetValue(vSlot, out var vTr)) return;
 
-        // Spinbot's real signature (owner): a HEADSHOT KILL landed during a SUSTAINED spin — constant
-        // spin + HS on HS. NOT the instantaneous rate at the kill tick: a human 180-flick is ~1200°/s
-        // but lasts 1-2 ticks and STOPS on the target (the false-positive that flagged MrJozk landing a
-        // HS off a flick). A spinbot's yaw never stops. spinRun is the current CONTINUOUS-spin length
-        // (>1200°/s, same direction); requiring it >= SpinRunTicks means the killer was mid-whirl, not
-        // mid-flick. Ties spinHsKills to the same sustained-spin gate as spinMaxYaw — so maxYaw==0
-        // (never sustained a spin) now implies spinHsKills==0, which zeroes all three prior FPs.
-        if (e.Headshot && spinRun.GetValueOrDefault(aSlot) >= 6)
+        // Spinbot's real signature (owner): a HEADSHOT KILL landed mid-spin, where the spin is >360° of
+        // CONTINUOUS rotation. A human flick can be 200-300° but STOPS on the target — you never rotate
+        // a full turn to aim (the FP that flagged MrJozk/misiak/IsugakU off flicks; all had maxYaw==0).
+        // spinSwept = degrees rotated without breaking the run; spinRun>0 = still spinning at the kill.
+        // A full circle without stopping = not aiming, spinning; a spinbot's yaw never stops.
+        if (e.Headshot && spinRun.GetValueOrDefault(aSlot) > 0 && spinSwept.GetValueOrDefault(aSlot) > 360f)
             spinHsKills[aSlot] = spinHsKills.GetValueOrDefault(aSlot) + 1;
 
         // ~1s of run-up at 64 tick, but only the ticks where the attacker could NOT see the victim.
@@ -1157,14 +1156,15 @@ static async Task<(List<PlayerResult> players, List<ShotRow> shots, List<KillRow
                         spinDir[s] = (int)MathF.Sign(dyaw);
                         int run = spinRun.GetValueOrDefault(s) + 1;
                         spinRun[s] = run;
+                        spinSwept[s] = spinSwept.GetValueOrDefault(s) + MathF.Abs(dyaw); // total continuous rotation
                         float runMin = run == 1 ? rate : MathF.Min(spinRunMin.GetValueOrDefault(s, rate), rate);
                         spinRunMin[s] = runMin;
                         if (run >= SpinRunTicks && runMin > spinMax.GetValueOrDefault(s))
                             spinMax[s] = runMin;   // the sustained floor of the run, not its peak
                     }
-                    else { spinRun[s] = 0; spinDir[s] = 0; }
+                    else { spinRun[s] = 0; spinDir[s] = 0; spinSwept[s] = 0f; }
                 }
-                else { spinRun[s] = 0; spinDir[s] = 0; }
+                else { spinRun[s] = 0; spinDir[s] = 0; spinSwept[s] = 0f; }
             }
 
             // Pack this pawn's spotted mask (who has seen it) into the ring, keyed by sequence.
