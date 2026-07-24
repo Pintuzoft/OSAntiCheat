@@ -7,7 +7,7 @@
     <LangVersion>latest</LangVersion>
     <RootNamespace>OSAntiCheat</RootNamespace>
     <AssemblyName>OSAntiCheat</AssemblyName>
-    <Version>0.6.1</Version>
+    <Version>0.7.0</Version>
     <!-- Required so CounterStrikeSharp can hot-load the plugin assembly -->
     <EnableDynamicLoading>true</EnableDynamicLoading>
   </PropertyGroup>
