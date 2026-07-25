@@ -1,0 +1,26 @@
+bin/
+obj/
+dist/
+*.user
+.vs/
+.idea/
+
+# XGuardian labelled feature data (local validation only, do not commit)
+xguardian-data/
+
+# Downloaded CS2 demos (local validation only) — anywhere, not just demos/
+demos/
+*.dem
+*.dem.gz
+
+# local analysis scratch
+scratch_wallers.csv
+
+# DemoReplay run outputs — carry real player IDs and names, and are reproducible
+baseline*.csv
+shots*.csv
+archive*.csv
+*-kills.csv
+
+# Private third-party data (ban list, real player IDs) — never publish
+private/
