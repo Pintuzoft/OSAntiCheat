@@ -1355,3 +1355,19 @@ G2, G3, G4 — ALLA med kick reason=41 före ban), 1 view-locked aimbot (C2),
 1 wallhack (C4), 1 informationsfall (C3). "Other"-perma = 2/6 fusk — aldrig anta.**
 - `aimbot.silent` live bör hooka **player_hurt, inte bara PlayerDeath** — varje träff-med-view-
   mismatch är ett event; fuskarna genererar många fler hurts än kills → snabbare binomial-fällning.
+
+## Öppenhet vs undanflykt (ägarens fråga 2026-07-25) — att diskutera, två åtgärder redo
+
+Frågan: en fuskmakare som läser repot kan läsa våra gates och ställa fusket strax utanför
+(t.ex. silent aim som håller viewn inom 9° när gaten är 10° — undviker både silent och bone-lock
+med det mesta av fördelen kvar). Hårdkanterna har inbyggt skydd (de kan bara undvikas genom att
+bli mer mänsklig = sämre fusk), men de exakta siffrorna läcker undanflykts-recept för vissa axlar.
+Vallgraven är DATA (arkivet, baslinjerna, labels), inte hemligheter — men två billiga åtgärder:
+- [ ] **Just-under-gaten-klumpen som meta-detektor** i arkivsvepen: ärliga fördelar sig mjukt
+      (opener-svansen dör vid 8°); en cheat kalibrerad mot en publicerad tröskel skapar en klump
+      strax under den — publicerade trösklar blir honeypots. Billig att lägga i measure-skripten.
+- [ ] **Princip: live-config får avvika från repo-defaults och publiceras aldrig** — fuskmakaren
+      vet var defaulten ligger, inte var serverns gate ligger. Dokumentera i private/, inte README.
+- Diskutera senare: hur mycket av exakta trösklar som ska stå i publika README/CHANGES framåt
+  (metod öppen alltid; siffror kanske avrundat/intervall). Modell-lagret (norra stjärnan) är
+  slutsvaret — beslutsgränser i vikter går inte att läsa sig till.
