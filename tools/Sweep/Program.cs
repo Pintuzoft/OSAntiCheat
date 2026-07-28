@@ -318,13 +318,19 @@ static async Task<Case> LoadCase(string demoPath, ulong cheaterId, string? bakes
     Stream input = raw;
     if (demoPath.EndsWith(".gz", StringComparison.OrdinalIgnoreCase))
     {
-        // The parser needs a seekable stream, so inflate into memory (~100-400 MB per demo).
-        var buffer = new MemoryStream();
-        await using (var gz = new GZipStream(raw, CompressionMode.Decompress))
-            await gz.CopyToAsync(buffer);
-        buffer.Position = 0;
-        input = buffer;
+        // The parser needs a seekable stream. Inflate to a delete-on-close temp file
+        // rather than memory — uncompressed demos run 100-400 MB and multi-demo runs
+        // OOM small machines otherwise.
+        var inflated = new FileStream(
+            Path.Combine(Path.GetTempPath(), Path.GetRandomFileName()),
+            FileMode.CreateNew, FileAccess.ReadWrite, FileShare.None, 1 << 16,
+            FileOptions.DeleteOnClose);
+        await using (var gz = new GZipStream(raw, CompressionMode.Decompress, leaveOpen: true))
+            await gz.CopyToAsync(inflated);
+        inflated.Position = 0;
+        input = inflated;
     }
+    await using var owned = input;
     var reader = DemoFileReader.Create(demo, input);
     await reader.ReadAllAsync();
 

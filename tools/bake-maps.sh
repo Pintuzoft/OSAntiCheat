@@ -9,7 +9,9 @@
 # from whichever container holds it. Idempotent: existing bakes are kept unless --force.
 #
 # usage: bake-maps.sh <server-root> <output-dir> <map>... [--force]
+#        bake-maps.sh <server-root> <output-dir> --all [--force]   # every map in the cache
 #   e.g. bake-maps.sh /home/cs2 ./bakes de_cbble_csgo de_zoo de_kismayo
+# Prints per-map bake times and a slowest-first summary at the end.
 #
 # Downloads the CS2FOW release (pinned below) into ./cs2fow-baker/ on first run, or set
 # CS2FOW_DIR to an existing unpacked release.
@@ -28,9 +30,12 @@ server_root=$1
 output_dir=$2
 shift 2
 force=0
+bake_all=0
 maps=()
 for arg in "$@"; do
-    if [ "$arg" = "--force" ]; then force=1; else maps+=("$arg"); fi
+    if [ "$arg" = "--force" ]; then force=1
+    elif [ "$arg" = "--all" ]; then bake_all=1
+    else maps+=("$arg"); fi
 done
 
 baker_dir=${CS2FOW_DIR:-./cs2fow-baker}
@@ -55,8 +60,15 @@ while IFS= read -r vpk_file; do
 done < <(find "$server_root" -name "*.vpk" ! -name "*_[0-9][0-9][0-9].vpk" 2>/dev/null)
 echo "   ${#map_to_vpk[@]} maps found in cache"
 
+if [ "$bake_all" = 1 ]; then
+    maps=()
+    while IFS= read -r m; do maps+=("$m"); done < <(printf '%s\n' "${!map_to_vpk[@]}" | sort)
+    echo "== --all: baking ${#maps[@]} maps"
+fi
+
 mkdir -p "$output_dir"
-ok=0; skipped=0; failed=()
+ok=0; skipped=0; failed=(); timings=()
+total_start=$(date +%s)
 for map in "${maps[@]}"; do
     if [ -f "$output_dir/$map.bvh8" ] && [ "$force" = 0 ]; then
         echo "== $map: bake exists, skipping (--force to rebake)"
@@ -70,8 +82,13 @@ for map in "${maps[@]}"; do
         continue
     fi
     echo "== $map: baking from $container"
+    map_start=$(date +%s)
     if "$baker" --game "$server_root" --map "$map" --vpk "$container" \
         --vrf "$vrf" --output "$output_dir/$map.bvh8" --low-priority; then
+        elapsed=$(($(date +%s) - map_start))
+        size=$(du -h "$output_dir/$map.bvh8" | cut -f1)
+        echo "   ${elapsed}s, $size"
+        timings+=("$elapsed $map")
         ok=$((ok + 1))
     else
         echo "== $map: BAKE FAILED"
@@ -80,6 +97,10 @@ for map in "${maps[@]}"; do
 done
 
 echo
-echo "== done: $ok baked, $skipped skipped, ${#failed[@]} failed"
+echo "== done: $ok baked, $skipped skipped, ${#failed[@]} failed, $(($(date +%s) - total_start))s total"
+if [ ${#timings[@]} -gt 0 ]; then
+    echo "== slowest first:"
+    printf '%s\n' "${timings[@]}" | sort -rn | head -20 | while read -r t m; do printf '   %4ss  %s\n' "$t" "$m"; done
+fi
 for f in "${failed[@]:-}"; do [ -n "$f" ] && echo "   FAILED: $f"; done
 [ ${#failed[@]} -eq 0 ]
