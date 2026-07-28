@@ -24,3 +24,7 @@ archive*.csv
 
 # Private third-party data (ban list, real player IDs) — never publish
 private/
+
+# CS2FOW map bakes — derived from Valve map data, carry their own DATA_NOTICE;
+# runtime assets only, never commit (download from CS2FOW releases or bake locally)
+*.bvh8
