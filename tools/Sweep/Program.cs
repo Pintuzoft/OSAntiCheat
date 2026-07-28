@@ -1,8 +1,10 @@
+using System.IO.Compression;
 using System.Numerics;
 using DemoFile;
 using DemoFile.Game.Cs;
 using OSAntiCheat.Detection.Detectors;
 using OSAntiCheat.Model;
+using OSAntiCheat.Visibility;
 
 // Parameter sweep against a demo containing a KNOWN cheater plus legit players in the same
 // match — the controlled experiment. Parses the demo once into a trace of per-poll observations,
@@ -28,7 +30,14 @@ if (args.Length < 1)
 // --eval bc,ff,br,ts,at  => don't sweep; run ONE config over every demo and print every
 // player-session ranked, cheaters marked. This is the population view: ranking first inside
 // your own match means nothing if legit players elsewhere score higher.
+//
+// --bakes <dir>  => load CS2FOW .bvh8 bakes (named <map>.bvh8, map taken from the demo
+// filename) and trace, per observation, whether EVERY sampled point on the enemy body was
+// occluded by static geometry. --eval then reports each session twice: the spotted-only
+// baseline and a geometry-gated variant where only provably-occluded targets count.
+// Demos without a bake run baseline-only and are excluded from the geo arm.
 Combo? evalCombo = null;
+string? bakesDir = null;
 var inputs = new List<string>();
 for (int i = 0; i < args.Length; i++)
 {
@@ -36,6 +45,11 @@ for (int i = 0; i < args.Length; i++)
     {
         var p = args[++i].Split(',').Select(s => float.Parse(s, System.Globalization.CultureInfo.InvariantCulture)).ToArray();
         evalCombo = new Combo(p[0], p[1], p[2], p[3], p[4]);
+        continue;
+    }
+    if (args[i] == "--bakes" && i + 1 < args.Length)
+    {
+        bakesDir = args[++i];
         continue;
     }
     inputs.Add(args[i]);
@@ -47,48 +61,68 @@ foreach (var arg in inputs)
     // "demo.dem:steamid" = known cheater present; "demo.dem" = assumed-clean demo.
     int sep = arg.LastIndexOf(':');
     if (sep > 1 && ulong.TryParse(arg[(sep + 1)..], out var cid))
-        cases.Add(await LoadCase(arg[..sep], cid));
+        cases.Add(await LoadCase(arg[..sep], cid, bakesDir));
     else
-        cases.Add(await LoadCase(arg, 0));
+        cases.Add(await LoadCase(arg, 0, bakesDir));
 }
 
 if (evalCombo is { } ec)
 {
     Console.WriteLine($"\n=== Every player-session under config " +
                       $"bearing={ec.BearingChange:F0} follow={ec.FollowFraction:F1} rate={ec.BearingRate:F0} " +
-                      $"track={ec.TrackSeconds:F1} aim={ec.AimThreshold:F0} ===\n");
+                      $"track={ec.TrackSeconds:F1} aim={ec.AimThreshold:F0}" +
+                      (bakesDir is not null ? " — A/B: baseline vs geometry-gated" : "") + " ===\n");
 
-    var all = new List<(string name, ulong sid, float rate, float minutes, int signals, bool cheater, string demo)>();
+    // Runs one session's trace through the detector; geoGated additionally requires the
+    // candidate to be provably occluded by static geometry before it counts as a target.
+    static int CountSignals(int slot, Obs[] obs, Combo c, bool geoGated)
+    {
+        var det = new WallhackDetector(c.TrackSeconds, 0f, c.BearingChange, c.FollowFraction, c.BearingRate);
+        int signals = 0;
+        foreach (var o in obs)
+        {
+            WallhackDetector.WallTarget? t =
+                (o.EnemyId >= 0 && o.AimErr <= c.AimThreshold && (!geoGated || o.GeoBlocked))
+                    ? new WallhackDetector.WallTarget(o.EnemyId, o.EnemyPos, o.AimErr, o.ViewYaw, o.BearingYaw)
+                    : null;
+            if (det.Observe(slot, o.Time, t) is not null) signals++;
+        }
+        return signals;
+    }
+
+    var all = new List<(string name, ulong sid, float rate, float geoRate, bool hasBake,
+                        float minutes, int signals, int geoSignals, bool cheater, string demo)>();
     foreach (var k in cases)
         foreach (var (slot, obs) in k.BySlot)
         {
-            var det = new WallhackDetector(ec.TrackSeconds, 0f, ec.BearingChange, ec.FollowFraction, ec.BearingRate);
-            int signals = 0;
-            foreach (var o in obs)
-            {
-                WallhackDetector.WallTarget? t = (o.EnemyId >= 0 && o.AimErr <= ec.AimThreshold)
-                    ? new WallhackDetector.WallTarget(o.EnemyId, o.EnemyPos, o.AimErr, o.ViewYaw, o.BearingYaw)
-                    : null;
-                if (det.Observe(slot, o.Time, t) is not null) signals++;
-            }
             float minutes = k.AlivePolls.GetValueOrDefault(slot) * 0.05f / 60f;
             if (minutes < 0.5f) continue; // sub-30s cameos: rate is meaningless
+            int signals = CountSignals(slot, obs, ec, geoGated: false);
+            int geoSignals = k.HasBake ? CountSignals(slot, obs, ec, geoGated: true) : 0;
             all.Add((k.Names.GetValueOrDefault(slot, "?"), k.SteamIds.GetValueOrDefault(slot),
-                     signals / minutes, minutes, signals, slot == k.CheaterSlot, Path.GetFileName(k.Demo)));
+                     signals / minutes, geoSignals / minutes, k.HasBake,
+                     minutes, signals, geoSignals, slot == k.CheaterSlot, Path.GetFileName(k.Demo)));
         }
 
-    Console.WriteLine("  rate/min  signals  min   player                    demo                       flag");
-    foreach (var r in all.OrderByDescending(r => r.rate))
-        Console.WriteLine($"  {r.rate,8:F2}  {r.signals,7}  {r.minutes,4:F1}  {r.name,-24}  {r.demo,-26} {(r.cheater ? "<<< BANNED CHEATER" : "")}");
+    Console.WriteLine("  base/min   geo/min  signals  geo  min   player                    demo                       flag");
+    foreach (var r in all.OrderByDescending(r => r.hasBake ? r.geoRate : r.rate).ThenByDescending(r => r.rate))
+        Console.WriteLine($"  {r.rate,8:F2}  {(r.hasBake ? r.geoRate.ToString("F2") : "-"),8}  {r.signals,7}  {(r.hasBake ? r.geoSignals.ToString() : "-"),3}  {r.minutes,4:F1}  " +
+                          $"{r.name,-24}  {r.demo,-26} {(r.cheater ? "<<< BANNED CHEATER" : "")}");
 
-    var cheats = all.Where(r => r.cheater).ToList();
-    var legits = all.Where(r => !r.cheater).ToList();
-    if (cheats.Count > 0 && legits.Count > 0)
+    foreach (var (label, geoArm) in new[] { ("BASELINE (spotted only)", false), ("GEO-GATED (spotted + occluded)", true) })
     {
-        int above = legits.Count(l => l.rate >= cheats.Min(c => c.rate));
-        Console.WriteLine($"\n  legit sessions scoring >= the LOWEST cheater: {above} / {legits.Count}");
-        Console.WriteLine($"  cheater rates: {string.Join(", ", cheats.OrderByDescending(c => c.rate).Select(c => $"{c.name}={c.rate:F2}"))}");
-        Console.WriteLine($"  legit  max/median: {legits.Max(l => l.rate):F2} / {legits.OrderBy(l => l.rate).ElementAt(legits.Count / 2).rate:F2}");
+        var pool = geoArm ? all.Where(r => r.hasBake).ToList() : all;
+        var cheats = pool.Where(r => r.cheater).ToList();
+        var legits = pool.Where(r => !r.cheater).ToList();
+        if (cheats.Count == 0 || legits.Count == 0) continue;
+        float Rate((string name, ulong sid, float rate, float geoRate, bool hasBake,
+                    float minutes, int signals, int geoSignals, bool cheater, string demo) r)
+            => geoArm ? r.geoRate : r.rate;
+        int above = legits.Count(l => Rate(l) >= cheats.Min(Rate));
+        Console.WriteLine($"\n  [{label}] " + (geoArm ? $"({pool.Count} sessions with bake) " : "") +
+                          $"legit >= lowest cheater: {above} / {legits.Count}");
+        Console.WriteLine($"    cheaters: {string.Join(", ", cheats.OrderByDescending(Rate).Select(c => $"{c.name}={Rate(c):F2}"))}");
+        Console.WriteLine($"    legit max/median: {legits.Max(Rate):F2} / {Rate(legits.OrderBy(Rate).ElementAt(legits.Count / 2)):F2}");
     }
     return 0;
 }
@@ -181,14 +215,35 @@ static (int rank, float cheatRate, float maxControl) Evaluate(Case k, Combo c)
     return (rank, cheat, maxControl);
 }
 
-static async Task<Case> LoadCase(string demoPath, ulong cheaterId)
+static async Task<Case> LoadCase(string demoPath, ulong cheaterId, string? bakesDir)
 {
     Console.WriteLine($"Parsing {Path.GetFileName(demoPath)} once into a trace...");
+
+    // Map name sits between the timestamp and the extension: YYYYMMDD-HHMMSS-<map>.dem[.gz]
+    Bvh8Map? bake = null;
+    if (bakesDir is not null)
+    {
+        var parts = Path.GetFileName(demoPath).Split('-', 3);
+        var mapName = parts.Length == 3
+            ? parts[2].Replace(".dem.gz", "").Replace(".dem", "")
+            : "?";
+        var bakePath = Path.Combine(bakesDir, mapName + ".bvh8");
+        if (File.Exists(bakePath))
+        {
+            bake = Bvh8Format.Load(bakePath);
+            Console.WriteLine($"  bake: {mapName}.bvh8 ({bake.TriangleCount:N0} triangles, source crc 0x{bake.SourceCrc32:x8})");
+        }
+        else
+        {
+            Console.WriteLine($"  bake: {mapName}.bvh8 NOT FOUND — baseline arm only");
+        }
+    }
 
     var trace = new List<Obs>(1 << 20);
     var alivePolls = new Dictionary<int, int>();
     var names = new Dictionary<int, string>();
     var steamIds = new Dictionary<int, ulong>();
+    var geoCache = new Dictionary<(int Observer, int Enemy), uint>();
 
     const float WidestCone = 25f; // nearest unspotted enemy up to here; per-config cone filters later
     var demo = new CsDemoParser();
@@ -249,11 +304,28 @@ static async Task<Case> LoadCase(string demoPath, ulong cheaterId)
             }
         }
 
-        trace.Add(new Obs(slot, now, bestId, bestPos, bestErr, angles.Yaw, bestBearing));
+        // Geometry verdict for the candidate: TRUE only when eye→EVERY sampled body point is
+        // occluded by baked static geometry. Any clear sample (or no bake) => false, so the
+        // geo-gated arm can only ever be stricter than the baseline — never looser.
+        bool geoBlocked = bake is not null && bestId >= 0
+            && AllSamplesBlocked(bake, eye, bestPos, geoCache, (slot, bestId));
+
+        trace.Add(new Obs(slot, now, bestId, bestPos, bestErr, angles.Yaw, bestBearing, geoBlocked));
     }
     };
 
-    var reader = DemoFileReader.Create(demo, File.OpenRead(demoPath));
+    await using var raw = File.OpenRead(demoPath);
+    Stream input = raw;
+    if (demoPath.EndsWith(".gz", StringComparison.OrdinalIgnoreCase))
+    {
+        // The parser needs a seekable stream, so inflate into memory (~100-400 MB per demo).
+        var buffer = new MemoryStream();
+        await using (var gz = new GZipStream(raw, CompressionMode.Decompress))
+            await gz.CopyToAsync(buffer);
+        buffer.Position = 0;
+        input = buffer;
+    }
+    var reader = DemoFileReader.Create(demo, input);
     await reader.ReadAllAsync();
 
     int cheaterSlot = -1;
@@ -266,14 +338,52 @@ static async Task<Case> LoadCase(string demoPath, ulong cheaterId)
     }
 
     var bySlot = trace.GroupBy(o => o.Slot).ToDictionary(g => g.Key, g => g.OrderBy(o => o.Time).ToArray());
+    int geoObs = trace.Count(o => o.GeoBlocked);
     Console.WriteLine($"  {trace.Count:N0} obs, {alivePolls.Count} players" +
+                      (bake is not null ? $", {geoObs:N0} geo-blocked candidates" : "") +
                       (cheaterSlot >= 0 ? $", cheater = {names[cheaterSlot]}" : ""));
 
-    return new Case(demoPath, cheaterSlot, cheaterSlot >= 0 ? names[cheaterSlot] : "", bySlot, alivePolls, names, steamIds);
+    return new Case(demoPath, cheaterSlot, cheaterSlot >= 0 ? names[cheaterSlot] : "", bySlot,
+        alivePolls, names, steamIds, bake is not null);
+}
+
+// Samples the enemy body at several heights plus head-height shoulder offsets perpendicular
+// to the sightline. ALL must be occluded to call the pair blocked; sampling above a crouched
+// head or beside the body errs toward CLEAR, which errs toward not flagging. Reuses the last
+// blocking packet per (observer, enemy) pair — near-stationary pairs skip the tree descent.
+static bool AllSamplesBlocked(
+    Bvh8Map bake, Vector3 eye, Vector3 feet,
+    Dictionary<(int Observer, int Enemy), uint> cache, (int Observer, int Enemy) key)
+{
+    var toEnemy = new Vector3(feet.X - eye.X, feet.Y - eye.Y, 0f);
+    var lateral = toEnemy.LengthSquared() > 1e-6f
+        ? Vector3.Normalize(new Vector3(-toEnemy.Y, toEnemy.X, 0f)) * 14f
+        : Vector3.Zero;
+    Span<Vector3> samples =
+    [
+        feet + new Vector3(0f, 0f, 4f),   // ankles (sees through low gaps like CS2FOW's feet point)
+        feet + new Vector3(0f, 0f, 36f),  // chest
+        feet + new Vector3(0f, 0f, 46f),  // crouched head
+        feet + new Vector3(0f, 0f, 60f),  // standing head
+        feet + new Vector3(0f, 0f, 60f) + lateral,
+        feet + new Vector3(0f, 0f, 60f) - lateral,
+    ];
+
+    uint cached = cache.TryGetValue(key, out var previous) ? previous : Bvh8Map.InvalidRef;
+    foreach (var sample in samples)
+    {
+        var hit = Bvh8Raycaster.SegmentBlocked(bake, eye, sample, cached);
+        if (!hit.Blocked)
+            return false;
+        cached = hit.PacketIndex;
+    }
+    cache[key] = cached;
+    return true;
 }
 
 internal readonly record struct Obs(
-    int Slot, float Time, int EnemyId, Vector3 EnemyPos, float AimErr, float ViewYaw, float BearingYaw);
+    int Slot, float Time, int EnemyId, Vector3 EnemyPos, float AimErr, float ViewYaw, float BearingYaw,
+    bool GeoBlocked);
 
 internal readonly record struct Combo(
     float BearingChange, float FollowFraction, float BearingRate, float TrackSeconds, float AimThreshold);
@@ -281,6 +391,6 @@ internal readonly record struct Combo(
 internal sealed record Case(
     string Demo, int CheaterSlot, string CheaterName,
     Dictionary<int, Obs[]> BySlot, Dictionary<int, int> AlivePolls,
-    Dictionary<int, string> Names, Dictionary<int, ulong> SteamIds);
+    Dictionary<int, string> Names, Dictionary<int, ulong> SteamIds, bool HasBake);
 
 internal sealed record MultiResult(Combo C, int[] Ranks, float[] Margins, bool AnySignal);
