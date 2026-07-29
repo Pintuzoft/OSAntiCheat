@@ -410,38 +410,16 @@ static async Task<Case> LoadCase(string demoPath, ulong cheaterId, string? bakes
         alivePolls, names, steamIds, bake is not null);
 }
 
-// Samples the enemy body at several heights plus head-height shoulder offsets perpendicular
-// to the sightline. ALL must be occluded to call the pair blocked; sampling above a crouched
-// head or beside the body errs toward CLEAR, which errs toward not flagging. Reuses the last
-// blocking packet per (observer, enemy) pair — near-stationary pairs skip the tree descent.
+// Body sampling lives in the shared BodyOcclusion (same code the live plugin runs); this
+// wrapper just threads the per-(observer, enemy) blocking-packet cache through it.
 static bool AllSamplesBlocked(
     Bvh8Map bake, Vector3 eye, Vector3 feet,
     Dictionary<(int Observer, int Enemy), uint> cache, (int Observer, int Enemy) key)
 {
-    var toEnemy = new Vector3(feet.X - eye.X, feet.Y - eye.Y, 0f);
-    var lateral = toEnemy.LengthSquared() > 1e-6f
-        ? Vector3.Normalize(new Vector3(-toEnemy.Y, toEnemy.X, 0f)) * 14f
-        : Vector3.Zero;
-    Span<Vector3> samples =
-    [
-        feet + new Vector3(0f, 0f, 4f),   // ankles (sees through low gaps like CS2FOW's feet point)
-        feet + new Vector3(0f, 0f, 36f),  // chest
-        feet + new Vector3(0f, 0f, 46f),  // crouched head
-        feet + new Vector3(0f, 0f, 60f),  // standing head
-        feet + new Vector3(0f, 0f, 60f) + lateral,
-        feet + new Vector3(0f, 0f, 60f) - lateral,
-    ];
-
     uint cached = cache.TryGetValue(key, out var previous) ? previous : Bvh8Map.InvalidRef;
-    foreach (var sample in samples)
-    {
-        var hit = Bvh8Raycaster.SegmentBlocked(bake, eye, sample, cached);
-        if (!hit.Blocked)
-            return false;
-        cached = hit.PacketIndex;
-    }
-    cache[key] = cached;
-    return true;
+    bool blocked = BodyOcclusion.AllSamplesBlocked(bake, eye, feet, ref cached);
+    if (blocked) cache[key] = cached;
+    return blocked;
 }
 
 internal readonly record struct Obs(

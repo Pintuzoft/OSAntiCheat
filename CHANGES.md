@@ -4,6 +4,24 @@ Version history for OSAntiCheat, newest first. Every release gets an entry here;
 describes the current state only. Player/admin names follow the pseudonym scheme from
 [TODO.md](TODO.md) (Cn = typed cheater, Gn = griefer, Rn = regular, An = admin).
 
+## v0.9.4 — geometric LOS gate for wallhack.track (CS2FOW BVH8 bakes)
+
+`src/Visibility/` — C# port of CS2FOW's `.bvh8` reader and segment raycaster (MIT, pinned to
+format v3/recipe 1, differentially verified bit-identical vs upstream on 400k segments). At
+map start the plugin background-loads `BakesDir/<map>.bvh8`; with `WallhackGeoGate` on, a
+wallhack.track candidate must be provably occluded by static geometry (6-point body sampling)
+AND unspotted by the observer's entire team. A gated signal on a *silent* enemy (≤120 u/s, no
+footsteps — no legitimate information channel at all) gets a confidence boost, never a gate.
+Missing/stale/invalid bake ⇒ geo gating inactive, spotted-only behaviour unchanged — never off.
+
+Measured before building (21 demos, 313 sessions, 16 maps — TODO.md "GEO-GATE-EXPERIMENTET"):
+legit noise 65→15 sessions (max 0.11 sig/min), best-sampled banned cheater kept at 0.47 = 4.3×
+the highest legit; a ≥0.2/min + ≥4 alive-min rule flags exactly that cheater population-wide.
+Gate defaults OFF pending live validation. Ships with `tools/VisOracle` (bake inspect/query),
+`tools/bake-maps.sh` (incremental server-side baking + per-CRC archive + era index), and a
+geometry-aware `tools/Sweep` (four eval arms, `--geo-dump`). Bakes are Valve-derived runtime
+data (CS2FOW DATA_NOTICE) — gitignored, distributed alongside the demo archive, never in git.
+
 ## v0.9.3 — announced version read from the assembly
 
 `ModuleVersion` was a hardcoded string that had survived two releases: a correctly deployed

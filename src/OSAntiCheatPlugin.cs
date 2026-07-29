@@ -11,6 +11,7 @@ using OSAntiCheat.Detection;
 using OSAntiCheat.Detection.Detectors;
 using OSAntiCheat.Model;
 using OSAntiCheat.Tracking;
+using OSAntiCheat.Visibility;
 
 namespace OSAntiCheat;
 
@@ -54,6 +55,11 @@ public sealed class OSAntiCheatPlugin : BasePlugin, IPluginConfig<OSAntiCheatCon
 
     private SuspicionEngine _engine = new();
     private AlertSink? _alerts;
+
+    // Geometric LOS gate: current map's CS2FOW bake + per-(observer, enemy) blocking-packet
+    // cache so near-stationary pairs skip the BVH descent (see docs/visibility-oracle.md).
+    private readonly MapBakeService _bake = new();
+    private readonly Dictionary<(int Observer, int Enemy), uint> _geoCache = new();
 
     private readonly Dictionary<int, float> _lastFire = new();
     private readonly Dictionary<string, DetectorKind> _detectorKinds = new(); // detector id -> response class
@@ -142,6 +148,11 @@ public sealed class OSAntiCheatPlugin : BasePlugin, IPluginConfig<OSAntiCheatCon
             return HookResult.Continue;
         });
 
+        // Geometric gate: load the current map's bake in the background at every map change.
+        // Missing/invalid bake => geo gating silently inactive (spotted-only behaviour remains).
+        RegisterListener<Listeners.OnMapStart>(LoadBakeForMap);
+        if (hotReload) LoadBakeForMap(Server.MapName);
+
         // Diagnostic: confirms on a live server that the sampler reads correct engine data.
         AddCommand("css_osac_debug", "Dump the caller's latest tracked sample", OnDebugCommand);
 
@@ -170,6 +181,9 @@ public sealed class OSAntiCheatPlugin : BasePlugin, IPluginConfig<OSAntiCheatCon
                 _wallhackGaze.Remove(player.Slot);
                 _nullTest.Remove(player.Slot);
                 _lastFire.Remove(player.Slot);
+                int gone = player.Slot;
+                foreach (var pair in _geoCache.Keys.Where(k => k.Observer == gone || k.Enemy == gone).ToList())
+                    _geoCache.Remove(pair);
             }
             return HookResult.Continue;
         });
@@ -328,6 +342,20 @@ public sealed class OSAntiCheatPlugin : BasePlugin, IPluginConfig<OSAntiCheatCon
         }
     }
 
+    private void LoadBakeForMap(string mapName)
+    {
+        _geoCache.Clear();
+        if (string.IsNullOrWhiteSpace(Config.BakesDir))
+        {
+            _bake.Clear();
+            return;
+        }
+        string dir = Path.IsPathRooted(Config.BakesDir)
+            ? Config.BakesDir
+            : Path.GetFullPath(Path.Combine(ModuleDirectory, Config.BakesDir));
+        _bake.LoadFor(mapName, dir, line => Logger.LogInformation("[geo] {Line}", line));
+    }
+
     private void PollWallhack()
     {
         if (!Config.EnableWallhack && !Config.EnableWallhackGaze && !Config.EnableNullTest) return;
@@ -357,6 +385,8 @@ public sealed class OSAntiCheatPlugin : BasePlugin, IPluginConfig<OSAntiCheatCon
             // Nearest unspotted enemy by crosshair (hard lock) and by gaze cone (soft follow).
             WallhackDetector.WallTarget? bestAim = null;
             float bestAimErr = aimThreshold;
+            bool bestTeamUnspotted = false;
+            float bestEnemySpeed = 0f;
             WallhackGazeDetector.GazeSample? bestGaze = null;
             float bestGazeErr = gazeCone;
             // Null test: McNemar discordant tally over ALL unspotted enemies this poll. Only the
@@ -385,6 +415,12 @@ public sealed class OSAntiCheatPlugin : BasePlugin, IPluginConfig<OSAntiCheatCon
                 {
                     bestAimErr = err;
                     bestAim = new WallhackDetector.WallTarget(enemy.Slot, feet, err, angles.Yaw, bearingYaw);
+                    // Unspotted by EVERYONE => no teammate radar dot to legitimately follow.
+                    bestTeamUnspotted = true;
+                    for (int i = 0; i < mask.Length; i++)
+                        if (mask[i] != 0) { bestTeamUnspotted = false; break; }
+                    var v = ep.AbsVelocity;
+                    bestEnemySpeed = MathF.Sqrt(v.X * v.X + v.Y * v.Y + v.Z * v.Z);
                 }
                 if (err < bestGazeErr)
                 {
@@ -406,7 +442,34 @@ public sealed class OSAntiCheatPlugin : BasePlugin, IPluginConfig<OSAntiCheatCon
             }
 
             if (Config.EnableWallhack)
-                Report(_wallhack, _wallhack.Observe(slot, now, bestAim));
+            {
+                var target = bestAim;
+                bool quiet = false;
+                // Geometric gate (measured stack, TODO.md "GEO-GATE-EXPERIMENTET"): the candidate
+                // must be provably occluded by static geometry AND unseen by the observer's whole
+                // team. Applies only when a bake is loaded — otherwise behaviour is unchanged.
+                if (target is { } t && Config.WallhackGeoGate && _bake.Current is { } bake)
+                {
+                    var pairKey = (slot, t.EnemyId);
+                    uint cached = _geoCache.GetValueOrDefault(pairKey, Bvh8Map.InvalidRef);
+                    bool occluded = BodyOcclusion.AllSamplesBlocked(bake, eye, t.EnemyPos, ref cached);
+                    _geoCache[pairKey] = cached;
+                    if (!occluded || !bestTeamUnspotted)
+                        target = null;
+                    else
+                        // No footsteps either => no legitimate information channel at all
+                        // (~1% of legit sessions in the A/B sweep) — boost, never gate.
+                        quiet = bestEnemySpeed <= Config.WallhackGeoQuietSpeedUnits;
+                }
+                var signal = _wallhack.Observe(slot, now, target);
+                if (signal is { } s && Config.WallhackGeoGate && _bake.Current is not null)
+                    signal = s with
+                    {
+                        Confidence = quiet ? MathF.Min(1f, s.Confidence * Config.WallhackGeoQuietBoost) : s.Confidence,
+                        Reason = s.Reason + (quiet ? " [geo: occluded+team-unseen+silent]" : " [geo: occluded+team-unseen]"),
+                    };
+                Report(_wallhack, signal);
+            }
             if (Config.EnableWallhackGaze)
                 Report(_wallhackGaze, _wallhackGaze.Observe(slot, now, bestGaze));
             if (Config.EnableNullTest)

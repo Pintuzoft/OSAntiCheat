@@ -262,6 +262,31 @@ public sealed class OSAntiCheatConfig : BasePluginConfig
     [JsonPropertyName("WallhackMinBearingRateDegPerSec")]
     public float WallhackMinBearingRateDegPerSec { get; set; } = 10f;
 
+    // Geometric gate (CS2FOW .bvh8 bakes; see docs/visibility-oracle.md). Off by default until
+    // live-validated. With no bake for the current map the gate simply doesn't apply — the
+    // detector falls back to spotted-only behaviour, never off.
+
+    /// <summary>Require wallhack.track candidates to be provably occluded by static geometry AND
+    /// unspotted by the observer's entire team. Measured (21 demos, 313 sessions): legit noise
+    /// 65→15 sessions, best-sampled cheater kept at 4.3x the highest legit rate.</summary>
+    [JsonPropertyName("WallhackGeoGate")]
+    public bool WallhackGeoGate { get; set; } = false;
+
+    /// <summary>Directory holding <c>&lt;map&gt;.bvh8</c> bakes. Relative paths resolve against the
+    /// plugin module directory; empty disables bake loading entirely.</summary>
+    [JsonPropertyName("BakesDir")]
+    public string BakesDir { get; set; } = "../../bakes";
+
+    /// <summary>Enemy speed (u/s) at or below which it emits no footsteps. A geo-gated signal on
+    /// such a silent enemy has no legitimate information channel at all (~1% of legit sessions);
+    /// its confidence is scaled by <see cref="WallhackGeoQuietBoost"/>.</summary>
+    [JsonPropertyName("WallhackGeoQuietSpeedUnits")]
+    public float WallhackGeoQuietSpeedUnits { get; set; } = 120f;
+
+    /// <summary>Confidence multiplier (clamped to 1.0) for geo-gated signals on a silent enemy.</summary>
+    [JsonPropertyName("WallhackGeoQuietBoost")]
+    public float WallhackGeoQuietBoost { get; set; } = 1.5f;
+
     // Smart wallhack (gaze-follow) detector.
 
     /// <summary>Gaze cone (deg): how far off-centre an unspotted enemy can be to count as "glanced at".</summary>
