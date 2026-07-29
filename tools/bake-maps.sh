@@ -19,6 +19,10 @@
 # old map versions are never overwritten, which keeps historical demos matchable.
 #   0 6 * * * cd /home/cs2/osanticheat && ./bake-maps.sh /home/cs2/serverfiles ./bakes --all >> bake.log 2>&1
 #
+# archive/ (per-CRC bakes + bakes-history.tsv era index) is meant to be shipped to the same
+# host as the demo archive — same transport as the demo upload, with CS2FOW's DATA_NOTICE
+# alongside. The game server itself only needs the current bakes in <output-dir>.
+#
 # Downloads the CS2FOW release (pinned below) into ./cs2fow-baker/ on first run, or set
 # CS2FOW_DIR to an existing unpacked release.
 set -u
@@ -106,7 +110,11 @@ for map in "${maps[@]}"; do
         fingerprint[$map]=$current_fp
         crc=$("$baker" --inspect-bvh8 "$output_dir/$map.bvh8" \
             | grep -o '"source_crc32":"0x[0-9a-f]*"' | cut -d'"' -f4)
-        [ -n "$crc" ] && cp -n "$output_dir/$map.bvh8" "$output_dir/archive/$map-$crc.bvh8"
+        if [ -n "$crc" ]; then
+            cp -n "$output_dir/$map.bvh8" "$output_dir/archive/$map-$crc.bvh8"
+            # Era index for the demo-analysis version guard: which bake was live when.
+            echo "$(date -u +%F)	$map	$crc" >> "$output_dir/archive/bakes-history.tsv"
+        fi
         ok=$((ok + 1))
     else
         echo "== $map: BAKE FAILED"
