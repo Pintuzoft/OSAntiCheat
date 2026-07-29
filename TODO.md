@@ -1400,8 +1400,22 @@ map-versioner försvinner ur cachen — arkivet löser detta FRAMÅT, inte retro
   kismayo-fallet (mar-10): signal ÖVERLEVDE gaten men map-versionen är fel (uppdaterad juli) →
   exploratory, ej evidens. Asymmetrin håller design-riktningen: BLOCKED är stark (statisk vägg
   blockerar på riktigt), CLEAR friar aldrig (dörrar/props/smoke okända för baken).
-- [ ] PÅGÅR: trearmskörning (baseline / geo / geo+**lagbred** ospottad — radar-hypotesen för de
-      17 överlevarna) + `--geo-dump` positions-TSV (galler/nät-hypotesen, zoo misstänkt).
-- [ ] SEN: geometriskt läge i wallhack.track/gaze live (bake-load vid map-load, fail-safe av utan
-      bake), tyst-fiende-viktning (shift-walk = ingen ljudkanal), versionsvakt i demo-analysen
-      (demo-datum mot arkivets CRC).
+**Fyrarmsresultatet (2026-07-29) — gate-stacken är avgjord:**
+| arm | legit-sessioner m. signal (av 310) | fuskarna |
+|---|---|---|
+| baseline (spotted-only) | 65 | 0.70 / 1.23 / 0.68 sign/min |
+| + geometriskt skymd (alla 6 kroppspunkter) | 17 (max 0.11/min) | 0.47 / 1.23 / 0 |
+| + lagbred ospottad (ingen radarprick) | 15 | oförändrade |
+| + tyst fiende ≤120 u/s (inga fotsteg) | 3 | **0 / 0 / 0** |
+- **Radar-hypotesen föll** (lagbred gate tog 2/17); ljud-hypotesen bekräftad: nästan alla
+  legit-överlevare trackade HÖRBART springande fiender (dump: korta avstånd, vertikala offsets =
+  fotstegs-tracking genom vägg/golv — legit gehör).
+- **Tyst-fiende är en VIKT, inte en gate:** som hård gate dödar den även fuskarnas signaler
+  (deras offer råkade springa — wallhackare trackar förstås hörbara fiender också). Rätt design:
+  hård gate = GEO+LAGBRED (Y kvar på 0.47 = 4.3× max legit); geo+lagbred+TYST-signal är en
+  sällsynthetsförstärkare (3 st i 313 sessioner ≈ 1 %) som väger tungt i fusionen när den slår.
+- [ ] De TRE geo+lagbred+tyst-legit-incidenterna (n=1 vardera) förtjänar manuell demo-titt —
+      antingen interp-kanteffekter/galler (FP-städning) eller genuint suspekta enstaka incidenter.
+- [ ] NÄSTA BYGGE: geometriskt läge i wallhack.track/gaze live — bake-load vid map-load
+      (fail-safe av utan bake), gate GEO+LAGBRED, tyst-fiende som vikt, versionsvakt i
+      demo-analysen (demo-datum mot arkivets käll-CRC). Server-cron för morgonbakning + arkiv.
