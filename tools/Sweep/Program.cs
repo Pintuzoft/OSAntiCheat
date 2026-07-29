@@ -38,6 +38,7 @@ if (args.Length < 1)
 // Demos without a bake run baseline-only and are excluded from the geo arm.
 Combo? evalCombo = null;
 string? bakesDir = null;
+string? geoDumpPath = null;
 var inputs = new List<string>();
 for (int i = 0; i < args.Length; i++)
 {
@@ -50,6 +51,11 @@ for (int i = 0; i < args.Length; i++)
     if (args[i] == "--bakes" && i + 1 < args.Length)
     {
         bakesDir = args[++i];
+        continue;
+    }
+    if (args[i] == "--geo-dump" && i + 1 < args.Length)
+    {
+        geoDumpPath = args[++i];
         continue;
     }
     inputs.Add(args[i]);
@@ -73,54 +79,76 @@ if (evalCombo is { } ec)
                       $"track={ec.TrackSeconds:F1} aim={ec.AimThreshold:F0}" +
                       (bakesDir is not null ? " — A/B: baseline vs geometry-gated" : "") + " ===\n");
 
-    // Runs one session's trace through the detector; geoGated additionally requires the
-    // candidate to be provably occluded by static geometry before it counts as a target.
-    static int CountSignals(int slot, Obs[] obs, Combo c, bool geoGated)
+    // Runs one session's trace through the detector under one gating arm. geoGated requires
+    // the candidate provably occluded by static geometry; teamGated additionally requires
+    // the enemy unspotted by the observer's ENTIRE team (no radar dot to follow). Signal
+    // observations are collected for the optional --geo-dump.
+    static int CountSignals(int slot, Obs[] obs, Combo c, bool geoGated, bool teamGated,
+        List<Obs>? signalObs = null)
     {
         var det = new WallhackDetector(c.TrackSeconds, 0f, c.BearingChange, c.FollowFraction, c.BearingRate);
         int signals = 0;
         foreach (var o in obs)
         {
             WallhackDetector.WallTarget? t =
-                (o.EnemyId >= 0 && o.AimErr <= c.AimThreshold && (!geoGated || o.GeoBlocked))
+                (o.EnemyId >= 0 && o.AimErr <= c.AimThreshold
+                 && (!geoGated || o.GeoBlocked) && (!teamGated || o.TeamUnspotted))
                     ? new WallhackDetector.WallTarget(o.EnemyId, o.EnemyPos, o.AimErr, o.ViewYaw, o.BearingYaw)
                     : null;
-            if (det.Observe(slot, o.Time, t) is not null) signals++;
+            if (det.Observe(slot, o.Time, t) is not null)
+            {
+                signals++;
+                signalObs?.Add(o);
+            }
         }
         return signals;
     }
 
-    var all = new List<(string name, ulong sid, float rate, float geoRate, bool hasBake,
-                        float minutes, int signals, int geoSignals, bool cheater, string demo)>();
+    using var geoDump = geoDumpPath is not null ? new StreamWriter(geoDumpPath) : null;
+    geoDump?.WriteLine("demo\tplayer\tsteamid\ttime\teyeX\teyeY\teyeZ\tenemyX\tenemyY\tenemyZ\taimErr\tteamUnspotted");
+
+    var all = new List<(string name, ulong sid, float rate, float geoRate, float teamRate, bool hasBake,
+                        float minutes, int signals, int geoSignals, int teamSignals, bool cheater, string demo)>();
     foreach (var k in cases)
         foreach (var (slot, obs) in k.BySlot)
         {
             float minutes = k.AlivePolls.GetValueOrDefault(slot) * 0.05f / 60f;
             if (minutes < 0.5f) continue; // sub-30s cameos: rate is meaningless
-            int signals = CountSignals(slot, obs, ec, geoGated: false);
-            int geoSignals = k.HasBake ? CountSignals(slot, obs, ec, geoGated: true) : 0;
-            all.Add((k.Names.GetValueOrDefault(slot, "?"), k.SteamIds.GetValueOrDefault(slot),
-                     signals / minutes, geoSignals / minutes, k.HasBake,
-                     minutes, signals, geoSignals, slot == k.CheaterSlot, Path.GetFileName(k.Demo)));
+            string name = k.Names.GetValueOrDefault(slot, "?");
+            int signals = CountSignals(slot, obs, ec, geoGated: false, teamGated: false);
+            var geoObs = geoDump is not null ? new List<Obs>() : null;
+            int geoSignals = k.HasBake ? CountSignals(slot, obs, ec, geoGated: true, teamGated: false, geoObs) : 0;
+            int teamSignals = k.HasBake ? CountSignals(slot, obs, ec, geoGated: true, teamGated: true) : 0;
+            if (geoObs is not null)
+                foreach (var o in geoObs)
+                    geoDump!.WriteLine($"{Path.GetFileName(k.Demo)}\t{name}\t{k.SteamIds.GetValueOrDefault(slot)}\t{o.Time:F1}\t" +
+                        $"{o.Eye.X:F0}\t{o.Eye.Y:F0}\t{o.Eye.Z:F0}\t{o.EnemyPos.X:F0}\t{o.EnemyPos.Y:F0}\t{o.EnemyPos.Z:F0}\t" +
+                        $"{o.AimErr:F1}\t{o.TeamUnspotted}");
+            all.Add((name, k.SteamIds.GetValueOrDefault(slot),
+                     signals / minutes, geoSignals / minutes, teamSignals / minutes, k.HasBake,
+                     minutes, signals, geoSignals, teamSignals, slot == k.CheaterSlot, Path.GetFileName(k.Demo)));
         }
 
-    Console.WriteLine("  base/min   geo/min  signals  geo  min   player                    demo                       flag");
+    Console.WriteLine("  base/min   geo/min  team/min  signals  geo  team  min   player                    demo                       flag");
     foreach (var r in all.OrderByDescending(r => r.hasBake ? r.geoRate : r.rate).ThenByDescending(r => r.rate))
-        Console.WriteLine($"  {r.rate,8:F2}  {(r.hasBake ? r.geoRate.ToString("F2") : "-"),8}  {r.signals,7}  {(r.hasBake ? r.geoSignals.ToString() : "-"),3}  {r.minutes,4:F1}  " +
+        Console.WriteLine($"  {r.rate,8:F2}  {(r.hasBake ? r.geoRate.ToString("F2") : "-"),8}  {(r.hasBake ? r.teamRate.ToString("F2") : "-"),8}  " +
+                          $"{r.signals,7}  {(r.hasBake ? r.geoSignals.ToString() : "-"),3}  {(r.hasBake ? r.teamSignals.ToString() : "-"),4}  {r.minutes,4:F1}  " +
                           $"{r.name,-24}  {r.demo,-26} {(r.cheater ? "<<< BANNED CHEATER" : "")}");
 
-    foreach (var (label, geoArm) in new[] { ("BASELINE (spotted only)", false), ("GEO-GATED (spotted + occluded)", true) })
+    foreach (var (label, mode) in new[]
+        { ("BASELINE (spotted only)", 0), ("GEO-GATED (+ occluded)", 1), ("GEO+TEAM (+ team-unspotted)", 2) })
     {
-        var pool = geoArm ? all.Where(r => r.hasBake).ToList() : all;
+        var pool = mode > 0 ? all.Where(r => r.hasBake).ToList() : all;
         var cheats = pool.Where(r => r.cheater).ToList();
         var legits = pool.Where(r => !r.cheater).ToList();
         if (cheats.Count == 0 || legits.Count == 0) continue;
-        float Rate((string name, ulong sid, float rate, float geoRate, bool hasBake,
-                    float minutes, int signals, int geoSignals, bool cheater, string demo) r)
-            => geoArm ? r.geoRate : r.rate;
+        float Rate((string name, ulong sid, float rate, float geoRate, float teamRate, bool hasBake,
+                    float minutes, int signals, int geoSignals, int teamSignals, bool cheater, string demo) r)
+            => mode switch { 0 => r.rate, 1 => r.geoRate, _ => r.teamRate };
         int above = legits.Count(l => Rate(l) >= cheats.Min(Rate));
-        Console.WriteLine($"\n  [{label}] " + (geoArm ? $"({pool.Count} sessions with bake) " : "") +
-                          $"legit >= lowest cheater: {above} / {legits.Count}");
+        int noisy = legits.Count(l => Rate(l) > 0f);
+        Console.WriteLine($"\n  [{label}] " + (mode > 0 ? $"({pool.Count} sessions with bake) " : "") +
+                          $"legit >= lowest cheater: {above} / {legits.Count}; legit sessions with any signal: {noisy}");
         Console.WriteLine($"    cheaters: {string.Join(", ", cheats.OrderByDescending(Rate).Select(c => $"{c.name}={Rate(c):F2}"))}");
         Console.WriteLine($"    legit max/median: {legits.Max(Rate):F2} / {Rate(legits.OrderBy(Rate).ElementAt(legits.Count / 2)):F2}");
     }
@@ -280,6 +308,7 @@ static async Task<Case> LoadCase(string demoPath, ulong cheaterId, string? bakes
         Vector3 bestPos = default;
         int bestId = -1;
         float bestBearing = 0f;
+        bool bestTeamUnspotted = false;
 
         foreach (var enemy in players)
         {
@@ -301,6 +330,8 @@ static async Task<Case> LoadCase(string demoPath, ulong cheaterId, string? bakes
                 bestPos = feet;
                 bestId = (int)enemy.EntityIndex.Value;
                 bestBearing = MathF.Atan2(feet.Y - eye.Y, feet.X - eye.X) * (180f / MathF.PI);
+                // Unspotted by EVERYONE => no teammate radar dot to legitimately follow.
+                bestTeamUnspotted = mask.All(bits => bits == 0);
             }
         }
 
@@ -310,7 +341,8 @@ static async Task<Case> LoadCase(string demoPath, ulong cheaterId, string? bakes
         bool geoBlocked = bake is not null && bestId >= 0
             && AllSamplesBlocked(bake, eye, bestPos, geoCache, (slot, bestId));
 
-        trace.Add(new Obs(slot, now, bestId, bestPos, bestErr, angles.Yaw, bestBearing, geoBlocked));
+        trace.Add(new Obs(slot, now, bestId, bestPos, bestErr, angles.Yaw, bestBearing,
+            geoBlocked, bestTeamUnspotted, eye));
     }
     };
 
@@ -389,7 +421,7 @@ static bool AllSamplesBlocked(
 
 internal readonly record struct Obs(
     int Slot, float Time, int EnemyId, Vector3 EnemyPos, float AimErr, float ViewYaw, float BearingYaw,
-    bool GeoBlocked);
+    bool GeoBlocked, bool TeamUnspotted, Vector3 Eye);
 
 internal readonly record struct Combo(
     float BearingChange, float FollowFraction, float BearingRate, float TrackSeconds, float AimThreshold);
