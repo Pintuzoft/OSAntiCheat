@@ -1371,3 +1371,37 @@ Vallgraven är DATA (arkivet, baslinjerna, labels), inte hemligheter — men tv�
 - Diskutera senare: hur mycket av exakta trösklar som ska stå i publika README/CHANGES framåt
   (metod öppen alltid; siffror kanske avrundat/intervall). Modell-lagret (norra stjärnan) är
   slutsvaret — beslutsgränser i vikter går inte att läsa sig till.
+
+## ⭐ VISIBILITY-ORACLE (CS2FOW BVH8) + GEO-GATE-EXPERIMENTET — 2026-07-28/29
+
+CS2FOW (github.com/karola3vax/CS2FOW, MIT) är ett open source server-side anti-wallhack-plugin
+(occlusion culling i CheckTransmit — prevention, komplementärt till vår detection). Vi porterade
+deras `.bvh8`-läsare + segment-raycaster till C# (`src/Visibility/`, `tools/VisOracle`), pinnad
+till format v3/recipe 1, differentiellt verifierad **bit-identisk** mot deras C++/AVX på 400k
+slumpsegment (dust2+mirage, officiella bakes). ~1.6 µs/query skalärt, ~130 ms att ladda dust2.
+Bakes är Valve-deriverad data (egen DATA_NOTICE) — gitignorade (`*.bvh8`), aldrig i repot.
+
+**Bakning i drift:** `tools/bake-maps.sh` på gameservern — indexerar workshop-containrar via
+bakerns `--list-maps` (workshop-items är numeriska container-VPK:er med `maps/<map>.vpk` nästlad),
+bakar inkrementellt (manifest med container-fingerprint), arkiverar per käll-CRC
+(`archive/<map>-<crc>.bvh8` — historiska demos förblir versionsmatchbara). Uppmätt på 243 mappar:
+**median 1–2 s/map, värsting 19 s** → bake-on-map-load är gratis; morgon-cron föreslagen.
+Lärdom: map-uppdateringar kan byta internt mapnamn (kismayo → de_kismayo_cs2) och gamla
+map-versioner försvinner ur cachen — arkivet löser detta FRAMÅT, inte retroaktivt.
+
+**Geo-gate-experimentet (wallhack.track + "alla samplade kroppspunkter geometriskt skymda"):**
+21 demos, 313 sessioner, 16 mappar, 3 bannade fuskare. Aggregat:
+- Bäst samplade confident-fuskaren (multihack jan-20-cbble): 0.70 → **0.47 sign/min i geo-armen
+  (2/3 signaler bekräftade genom solid vägg), 4.3× över högsta legit i HELA populationen** (0.11).
+  Baseline-marginalen var ~1.5×.
+- Legit-brus: 44 baseline-signaler → 17/310 sessioner (5.5 %) med någon geo-signal, ingen >0.11/min.
+  Tröskel ≥0.2/min + ≥4 alive-min flaggar EXAKT en spelare i hela materialet: fuskaren.
+- zoo-fallet (feb-20): n=1-signal på 1.5 min dog i gaten — inconclusive, behöver fler demos.
+  kismayo-fallet (mar-10): signal ÖVERLEVDE gaten men map-versionen är fel (uppdaterad juli) →
+  exploratory, ej evidens. Asymmetrin håller design-riktningen: BLOCKED är stark (statisk vägg
+  blockerar på riktigt), CLEAR friar aldrig (dörrar/props/smoke okända för baken).
+- [ ] PÅGÅR: trearmskörning (baseline / geo / geo+**lagbred** ospottad — radar-hypotesen för de
+      17 överlevarna) + `--geo-dump` positions-TSV (galler/nät-hypotesen, zoo misstänkt).
+- [ ] SEN: geometriskt läge i wallhack.track/gaze live (bake-load vid map-load, fail-safe av utan
+      bake), tyst-fiende-viktning (shift-walk = ingen ljudkanal), versionsvakt i demo-analysen
+      (demo-datum mot arkivets CRC).
