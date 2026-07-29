@@ -67,8 +67,11 @@ done < <(find "$server_root" -name "*.vpk" ! -name "*_[0-9][0-9][0-9].vpk" 2>/de
 echo "   ${#map_to_vpk[@]} maps found in cache"
 
 if [ "$bake_all" = 1 ]; then
+    # Skip 3D-skybox sub-maps and editor/prefab scenes: they list as maps but carry no
+    # world physics (instant BAKE FAILED noise). Explicitly named maps bypass the filter.
     maps=()
-    while IFS= read -r m; do maps+=("$m"); done < <(printf '%s\n' "${!map_to_vpk[@]}" | sort)
+    while IFS= read -r m; do maps+=("$m"); done < <(printf '%s\n' "${!map_to_vpk[@]}" \
+        | grep -viE 'skybox|3d_?sky|^prefabs/|/prefabs/|^editor/|^lobby_|^glass_test$|^dynamic$' | sort)
     echo "== --all: baking ${#maps[@]} maps"
 fi
 
