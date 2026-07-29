@@ -13,6 +13,12 @@
 #   e.g. bake-maps.sh /home/cs2 ./bakes de_cbble_csgo de_zoo de_kismayo
 # Prints per-map bake times and a slowest-first summary at the end.
 #
+# Incremental: <output-dir>/manifest.tsv records each map's container fingerprint
+# (size:mtime); unchanged maps are skipped, so a daily cron re-bakes only what Steam
+# updated. Every new bake is also copied to <output-dir>/archive/<map>-<crc>.bvh8 —
+# old map versions are never overwritten, which keeps historical demos matchable.
+#   0 6 * * * cd /home/cs2/osanticheat && ./bake-maps.sh /home/cs2/serverfiles ./bakes --all >> bake.log 2>&1
+#
 # Downloads the CS2FOW release (pinned below) into ./cs2fow-baker/ on first run, or set
 # CS2FOW_DIR to an existing unpacked release.
 set -u
@@ -66,19 +72,24 @@ if [ "$bake_all" = 1 ]; then
     echo "== --all: baking ${#maps[@]} maps"
 fi
 
-mkdir -p "$output_dir"
+mkdir -p "$output_dir" "$output_dir/archive"
+manifest="$output_dir/manifest.tsv"
+declare -A fingerprint
+[ -f "$manifest" ] && while IFS=$'\t' read -r m fp; do fingerprint[$m]=$fp; done < "$manifest"
+
 ok=0; skipped=0; failed=(); timings=()
 total_start=$(date +%s)
 for map in "${maps[@]}"; do
-    if [ -f "$output_dir/$map.bvh8" ] && [ "$force" = 0 ]; then
-        echo "== $map: bake exists, skipping (--force to rebake)"
-        skipped=$((skipped + 1))
-        continue
-    fi
     container=${map_to_vpk[$map]:-}
     if [ -z "$container" ]; then
         echo "== $map: NOT FOUND in any VPK under $server_root"
         failed+=("$map (not in cache)")
+        continue
+    fi
+    current_fp=$(stat -c '%s:%Y' "$container")
+    if [ -f "$output_dir/$map.bvh8" ] && [ "$force" = 0 ] \
+        && [ "${fingerprint[$map]:-}" = "$current_fp" ]; then
+        skipped=$((skipped + 1))
         continue
     fi
     echo "== $map: baking from $container"
@@ -89,12 +100,18 @@ for map in "${maps[@]}"; do
         size=$(du -h "$output_dir/$map.bvh8" | cut -f1)
         echo "   ${elapsed}s, $size"
         timings+=("$elapsed $map")
+        fingerprint[$map]=$current_fp
+        crc=$("$baker" --inspect-bvh8 "$output_dir/$map.bvh8" \
+            | grep -o '"source_crc32":"0x[0-9a-f]*"' | cut -d'"' -f4)
+        [ -n "$crc" ] && cp -n "$output_dir/$map.bvh8" "$output_dir/archive/$map-$crc.bvh8"
         ok=$((ok + 1))
     else
         echo "== $map: BAKE FAILED"
         failed+=("$map (baker error)")
     fi
 done
+
+for m in "${!fingerprint[@]}"; do printf '%s\t%s\n' "$m" "${fingerprint[$m]}"; done | sort > "$manifest"
 
 echo
 echo "== done: $ok baked, $skipped skipped, ${#failed[@]} failed, $(($(date +%s) - total_start))s total"
