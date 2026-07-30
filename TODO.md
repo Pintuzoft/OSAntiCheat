@@ -1419,3 +1419,30 @@ map-versioner försvinner ur cachen — arkivet löser detta FRAMÅT, inte retro
 - [ ] NÄSTA BYGGE: geometriskt läge i wallhack.track/gaze live — bake-load vid map-load
       (fail-safe av utan bake), gate GEO+LAGBRED, tyst-fiende som vikt, versionsvakt i
       demo-analysen (demo-datum mot arkivets käll-CRC). Server-cron för morgonbakning + arkiv.
+
+## Idébank från CS2AC (karola3vax's detection-syskon till CS2FOW) — 2026-07-29
+
+[CS2AC](https://github.com/karola3vax/CS2AC): C++/Metamod, 17 regelbaserade detektorer,
+auto-punish, **AGPL-3.0 — idéer fria, kod får ALDRIG kopieras in i vårt MIT-repo.** Ingen
+publicerad FP-metodik — varje axel nedan börjar som alltid med arkiv-mätning av ärlig
+population, aldrig med deras trösklar. Aim-sviten överlappar det vi redan har (ofta med
+bättre baslinjer); det intressanta är hålen vi INTE täcker:
+
+**Movement (vi har noll movement-detektorer idag):**
+- [ ] **bhop/hyperscroll**: deras signal = perfekta landing→jump-kedjor (12 raka perfs),
+      perf-ratio i 30-hoppsfönster, och repetitiva input-MÖNSTER (≥90 % samma scrollmönster =
+      skript). CSSharp-nivå: hopp-knapp per tick finns i vår OnTick-sampling → perfekta
+      kedjor mätbara i tick-upplösning. Input-mönster-entropi kräver usercmd-access (se nedan).
+      Arkivet först: ärliga spelares perf-ratio-fördelning → var dör svansen?
+- [ ] **autostrafe**: hastighetsbevarande i luften över många hopp — position/velocity har vi.
+
+**Subtick/exploit (CS2-erans mekaniska fusk, kräver usercmd-nivå):**
+- [ ] **desubticking/subtick spam/invalid input**: läser usercmd:s subtick-moves — "when"-
+      fraktioner plattade till 0 (ratio ≥0.9), obalanserade knapp-events, input-bursts.
+      Kräver usercmd-hook: C++-plugin eller CSSharp-memory-lib — utred access-väg FÖRST.
+- [ ] **doubletap**: eldkommandon tätare än vapnets cykeltid — fire-ticks har vi redan i
+      events/demos → arkiv-mätbar IDAG utan ny access. Ren LogicBreach-kandidat.
+
+**Designidé värd att låna (koncept):** deras doubletap bär "network safety evidence" —
+ping/jitter/loss/choke kan VETOA en detektion. Anti-FP-mönster som borde generaliseras till
+alla våra timing-känsliga axlar (snap, triggerbot, silent): lagg-evidens dämpar, aldrig fäller.
