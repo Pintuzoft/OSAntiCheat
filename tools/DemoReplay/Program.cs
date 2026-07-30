@@ -34,6 +34,8 @@ string? csvPath = null;
 string? shotsPath = null;
 string? killsPath = null;   // --kills out.csv: one row per kill with raw deadaim components
 string? hurtsPath = null;   // --hurts out.csv: one row per enemy bullet hurt with the silent-aim raw measurement
+string? reactionsPath = null; // --reactions out.csv: one row per unseen->seen rising edge (aim-onset vs visibility)
+string? rotationsPath = null; // --rotations out.csv: one row per stationary rotation episode (the smacke loop)
 string? configPath = null;  // --config thresholds.json: per-detector knobs for the detections report
 string? since = null, until = null;
 string? failLog = null;
@@ -50,6 +52,8 @@ for (int i = 1; i < args.Length; i++)
     if (args[i] == "--shots" && i + 1 < args.Length) shotsPath = args[i + 1];
     if (args[i] == "--kills" && i + 1 < args.Length) killsPath = args[i + 1];
     if (args[i] == "--hurts" && i + 1 < args.Length) hurtsPath = args[i + 1];
+    if (args[i] == "--reactions" && i + 1 < args.Length) reactionsPath = args[i + 1];
+    if (args[i] == "--rotations" && i + 1 < args.Length) rotationsPath = args[i + 1];
     if (args[i] == "--config" && i + 1 < args.Length) configPath = args[i + 1];
     if (args[i] == "--since" && i + 1 < args.Length) since = args[i + 1];
     if (args[i] == "--until" && i + 1 < args.Length) until = args[i + 1];
@@ -268,13 +272,36 @@ if (hurtsPath is not null)
     hurtsCsv.Flush();
 }
 
+StreamWriter? reactionsCsv = null;
+if (reactionsPath is not null)
+{
+    // Aim-onset vs visibility, one row per unseen->seen rising edge. latencyMs = time from the
+    // edge (earliest legitimate visual stimulus) until the crosshair arrives (<=3deg); -1 = never
+    // engaged. preConvergeDeg > 0 = the aim was ALREADY closing on the enemy before the edge —
+    // only telling when audible=0 and smoke=0 (no sound, no watched smoke to explain it).
+    bool freshReactions = !File.Exists(reactionsPath) || new FileInfo(reactionsPath).Length == 0;
+    reactionsCsv = new StreamWriter(reactionsPath, append: true) { AutoFlush = false };
+    if (freshReactions) reactionsCsv.WriteLine("demo,obsId,obsName,victimId,victimName,round,tick," +
+        "latencyMs,errAtEdgeDeg,preConvergeDeg,victimSpeed,audible,smoke");
+    reactionsCsv.Flush();
+}
+
+StreamWriter? rotationsCsv = null;
+if (rotationsPath is not null)
+{
+    bool freshRotations = !File.Exists(rotationsPath) || new FileInfo(rotationsPath).Length == 0;
+    rotationsCsv = new StreamWriter(rotationsPath, append: true) { AutoFlush = false };
+    if (freshRotations) rotationsCsv.WriteLine("demo,steamId,name,tickStart,durS,nWays,laps,medianDwellMs,stability,wayYaws");
+    rotationsCsv.Flush();
+}
+
 // Each demo is parsed independently, so this scales straight across cores.
 await Parallel.ForEachAsync(demoFiles, new ParallelOptions { MaxDegreeOfParallelism = jobs },
     async (file, _) =>
     {
         try
         {
-            var (results, shotRows, killRows, hurtRows) = await ReplayOne(file, pollInterval, revisitTarget, demoFiles.Count <= 5);
+            var (results, shotRows, killRows, hurtRows, encRows, rotRows) = await ReplayOne(file, pollInterval, revisitTarget, demoFiles.Count <= 5);
             lock (gate)
             {
                 foreach (var r in results) allScores.Add(r.PeakScore);
@@ -355,10 +382,25 @@ await Parallel.ForEachAsync(demoFiles, new ParallelOptions { MaxDegreeOfParallel
                         $"{h.Round},{h.Tick},{Csv(h.Weapon)},{h.Dmg}," +
                         $"{h.DistU.ToString("F0", CultureInfo.InvariantCulture)},{h.Candidates}," +
                         $"{h.MinErrDeg.ToString("F3", CultureInfo.InvariantCulture)},{h.BurstOpener}");
+                foreach (var r in rotRows)
+                    rotationsCsv?.WriteLine($"{Csv(Path.GetFileName(file))},{r.SteamId},{Csv(r.Name)},{r.TickStart}," +
+                        $"{r.DurS.ToString("F1", CultureInfo.InvariantCulture)},{r.NWays},{r.Laps}," +
+                        $"{r.MedianDwellMs.ToString("F0", CultureInfo.InvariantCulture)}," +
+                        $"{r.Stability.ToString("F2", CultureInfo.InvariantCulture)},{Csv(r.WayYaws)}");
+                foreach (var r in encRows)
+                    reactionsCsv?.WriteLine($"{Csv(Path.GetFileName(file))},{r.ObsId},{Csv(r.ObsName)},{r.VictimId},{Csv(r.VictimName)}," +
+                        $"{r.Round},{r.Tick}," +
+                        $"{r.LatencyMs.ToString("F0", CultureInfo.InvariantCulture)}," +
+                        $"{r.ErrAtEdgeDeg.ToString("F2", CultureInfo.InvariantCulture)}," +
+                        $"{r.PreConvergeDeg.ToString("F2", CultureInfo.InvariantCulture)}," +
+                        $"{r.VictimSpeed.ToString("F0", CultureInfo.InvariantCulture)}," +
+                        $"{(r.Audible ? 1 : 0)},{(r.SmokeNearRay ? 1 : 0)}");
                 csv?.Flush();       // one flush per demo, not one per row
                 shotsCsv?.Flush();
                 killsCsv?.Flush();
                 hurtsCsv?.Flush();
+                reactionsCsv?.Flush();
+                rotationsCsv?.Flush();
                 DrawProgress(done, demoFiles.Count, started, failed);
             }
         }
@@ -376,6 +418,9 @@ await Parallel.ForEachAsync(demoFiles, new ParallelOptions { MaxDegreeOfParallel
 csv?.Dispose();
 shotsCsv?.Dispose();
 killsCsv?.Dispose();
+hurtsCsv?.Dispose();
+reactionsCsv?.Dispose();
+rotationsCsv?.Dispose();
 Console.WriteLine();
 Console.WriteLine($"\nParsed in {(DateTime.UtcNow - started).TotalMinutes:F1} min");
 
@@ -552,7 +597,7 @@ static string Csv(string s) => s.Contains(',') || s.Contains('"') ? $"\"{s.Repla
 
 // printBlocks: the per-demo reaction-cloud and head-precision tables are for eyeballing single
 // demos; an archive sweep would print thousands of them (the data still lands in the shots CSV).
-static async Task<(List<PlayerResult> players, List<ShotRow> shots, List<KillRow> kills, List<HurtRow> hurts)> ReplayOne(string file, float pollInterval, ulong revisitTarget, bool printBlocks = true)
+static async Task<(List<PlayerResult> players, List<ShotRow> shots, List<KillRow> kills, List<HurtRow> hurts, List<EncounterRow> encounters, List<RotationRow> rotations)> ReplayOne(string file, float pollInterval, ulong revisitTarget, bool printBlocks = true)
 {
     var demo = new CsDemoParser();
 
@@ -742,9 +787,74 @@ static async Task<(List<PlayerResult> players, List<ShotRow> shots, List<KillRow
     int sequence = 0;
     const float BurstWindowSeconds = 0.25f;
 
+    // --- aim-onset vs visibility (the reaction-latency axis, owner's idea from the Camz review) ---
+    // For every unseen->seen rising edge of an enemy (the earliest legitimate visual stimulus),
+    // measure where the observer's crosshair WAS and when it started converging. Sound (running,
+    // gunfire, reloads) and smoke are modelled so "knew before seeing" separates from "heard it" /
+    // "watched the smoke". A human's aim arrives only AFTER the edge (+150-350ms); converging
+    // BEFORE the edge on a silent, unsmoked enemy is the tell no skill explains.
+    var encounterRows = new List<EncounterRow>();
+    var pendingEnc = new List<PendingEnc>();
+    var prevMask = new Dictionary<int, ulong>();           // victim slot -> previous tick's SpottedByMask
+    var activeSmokes = new List<(Vector3 pos, float t)>();
+    var reloadEvents = new Dictionary<int, List<(float t, Vector3 pos)>>();
+    int smokeGatedSamples = 0;                             // null-test samples dropped by the smoke gate
+    const float SmokeRadiusU = 150f;     // CS2 smoke occlusion volume, approximated as a sphere
+    const float SmokeMaxAgeS = 22f;      // detonate->expire ~19.7s + margin (expired event also prunes)
+    const float ReloadAudibleU = 1400f;  // reload sounds carry roughly this far (no wall attenuation modelled)
+    const float ReloadAudibleS = 4f;     // a reload heard this recently = the observer was informed
+    const float GunfireAudibleS = 6f;    // gunfire is near map-wide; recency alone gates it
+    const float SilentSpeedU = 140f;     // same audibility floor as wallhack.revisit
+    const float EncOnDeg = 3f;           // crosshair "arrived" cone
+    const float EncWatchS = 1.2f;        // how long after the edge we wait for the aim to arrive
+    const float EncPreWindowS = 0.3f;    // pre-edge window for the convergence measurement
+    const float EncMaxEdgeDeg = 60f;     // enemy appeared way off view centre -> not an aim encounter
+
+    bool SmokeBlocks(Vector3 a, Vector3 b, float tNow)
+    {
+        foreach (var s in activeSmokes)
+        {
+            if (tNow - s.t > SmokeMaxAgeS) continue;
+            var ab = b - a;
+            float len2 = ab.LengthSquared();
+            if (len2 < 1f) continue;
+            float t = Math.Clamp(Vector3.Dot(s.pos - a, ab) / len2, 0f, 1f);
+            if (Vector3.Distance(a + ab * t, s.pos) <= SmokeRadiusU) return true;
+        }
+        return false;
+    }
+
+    bool VictimAudibleTo(int vSlot, Vector3 obsPos, float tNow, float vSpeed)
+    {
+        if (vSpeed >= SilentSpeedU) return true;   // running = footsteps
+        if (fireTimes.TryGetValue(vSlot, out var ft) && ft.Count > 0 && tNow - ft[^1] <= GunfireAudibleS) return true;
+        if (reloadEvents.TryGetValue(vSlot, out var rl))
+            for (int i = rl.Count - 1; i >= 0 && tNow - rl[i].t <= ReloadAudibleS; i--)
+                if (Vector3.Distance(rl[i].pos, obsPos) <= ReloadAudibleU) return true;
+        return false;
+    }
+
     float roundStartTime = 0f;
     int roundNumber = 0;
     float Now() => demo.CurrentDemoTick.Value / (float)Math.Max(1, CsDemoParser.TickRate);
+    demo.Source1GameEvents.SmokegrenadeDetonate += e =>
+        activeSmokes.Add((new Vector3(e.X, e.Y, e.Z), Now()));
+    demo.Source1GameEvents.SmokegrenadeExpired += e =>
+    {
+        var p = new Vector3(e.X, e.Y, e.Z);
+        activeSmokes.RemoveAll(s => Vector3.Distance(s.pos, p) < 64f);
+    };
+    demo.Source1GameEvents.WeaponReload += e =>
+    {
+        var pl = e.Player;
+        if (pl?.PlayerPawn is { } rp && pl.PawnIsAlive)
+        {
+            int rs = (int)pl.EntityIndex.Value - 1;
+            if (rs < 0) return;
+            if (!reloadEvents.TryGetValue(rs, out var l)) reloadEvents[rs] = l = new List<(float, Vector3)>();
+            l.Add((Now(), new Vector3(rp.Origin.X, rp.Origin.Y, rp.Origin.Z)));
+        }
+    };
     demo.Source1GameEvents.RoundStart += _ =>
     {
         roundStartTime = Now();
@@ -762,6 +872,107 @@ static async Task<(List<PlayerResult> players, List<ShotRow> shots, List<KillRow
         if (signal is not { } s) return;
         signals[(s.PlayerSlot, s.Detector)] = signals.GetValueOrDefault((s.PlayerSlot, s.Detector)) + 1;
         engine.Report(s, detector.Weight);
+    }
+
+    // --- rotation v0 (the smacke/LimpaN loop): cyclic angle-holding at a stationary position ---
+    // A skilled player covering N approach paths holds way1->way2->...->wayN->repeat, ~1s per way.
+    // Raw measurement only: segment the yaw series into dwells while the player stays put, cluster
+    // dwell angles into "ways", and score the visit sequence for cyclicity. The loop itself is
+    // SKILL (paying attention for information); what it feeds later is the fingerprint (order +
+    // rhythm per player) and the outcome/info-purchase ratio. Regularity is NOT a tell — the best
+    // legit look the most mechanical (the owner's warning) — so nothing here flags; it measures.
+    var rotAnchor = new Dictionary<int, (Vector3 pos, float t0)>();           // stationary episode
+    var rotHolds = new Dictionary<int, List<(float yaw, float t0, float t1)>>(); // finished dwells
+    var rotDwell = new Dictionary<int, (float yaw0, float sum, int n, float t0)>(); // current dwell
+    var rotationRows = new List<RotationRow>();
+    const float RotAnchorU = 128f;      // stationary = stays within this of the episode anchor
+    const float RotDwellBandDeg = 7.5f; // yaw stays inside this band = same dwell
+    const float RotMinDwellS = 0.35f;   // shorter than this = a sweep-through, not a held way
+    const float RotWayMergeDeg = 15f;   // dwell angles this close are the same way
+    const float RotMinEpisodeS = 5f;    // need room for >=2 laps of a ~1s-per-way loop
+    const float RotFreezeSkipS = 15f;   // spawn/freeze scanning pollutes; skip early-round holds
+
+    void RotCloseDwell(int s, float tEnd)
+    {
+        if (!rotDwell.TryGetValue(s, out var d)) return;
+        rotDwell.Remove(s);
+        if (tEnd - d.t0 >= RotMinDwellS)
+        {
+            if (!rotHolds.TryGetValue(s, out var l)) rotHolds[s] = l = new List<(float, float, float)>();
+            l.Add((d.sum / d.n, d.t0, tEnd));
+        }
+    }
+
+    void RotCloseEpisode(int s, float tEnd)
+    {
+        RotCloseDwell(s, tEnd);
+        if (!rotAnchor.TryGetValue(s, out var a)) { rotHolds.Remove(s); return; }
+        rotAnchor.Remove(s);
+        var holds = rotHolds.GetValueOrDefault(s);
+        rotHolds.Remove(s);
+        if (holds is null || holds.Count < 4 || tEnd - a.t0 < RotMinEpisodeS) return;
+
+        // Cluster dwell angles into ways (circular running mean), then the deduped visit sequence.
+        var wayYaw = new List<float>();
+        var seq = new List<(int way, float dur)>();
+        foreach (var h in holds)
+        {
+            int w = -1;
+            for (int i = 0; i < wayYaw.Count; i++)
+            {
+                float d = h.yaw - wayYaw[i]; d -= 360f * MathF.Round(d / 360f);
+                if (MathF.Abs(d) <= RotWayMergeDeg) { w = i; wayYaw[i] += d * 0.3f; break; }
+            }
+            if (w < 0) { wayYaw.Add(h.yaw); w = wayYaw.Count - 1; }
+            if (seq.Count > 0 && seq[^1].way == w) seq[^1] = (w, seq[^1].dur + (h.t1 - h.t0));
+            else seq.Add((w, h.t1 - h.t0));
+        }
+        int nWays = wayYaw.Count;
+        if (nWays < 2 || seq.Count < nWays * 2) return;
+
+        var visits = new int[nWays];
+        foreach (var v in seq) visits[v.way]++;
+        int laps = visits.Min();
+        if (laps < 2) return;
+
+        // Order stability: how often the transition out of a way goes to that way's MODAL successor.
+        var trans = new Dictionary<(int from, int to), int>();
+        for (int i = 1; i < seq.Count; i++)
+            trans[(seq[i - 1].way, seq[i].way)] = trans.GetValueOrDefault((seq[i - 1].way, seq[i].way)) + 1;
+        float stable = 0f; int outs = 0;
+        for (int w = 0; w < nWays; w++)
+        {
+            var from = trans.Where(kv => kv.Key.from == w).ToList();
+            int tot = from.Sum(kv => kv.Value);
+            if (tot == 0) continue;
+            stable += from.Max(kv => kv.Value) / (float)tot; outs++;
+        }
+        stable = outs > 0 ? stable / outs : 0f;
+
+        var dwells = seq.Select(v => v.dur * 1000f).OrderBy(x => x).ToList();
+        rotationRows.Add(new RotationRow(
+            steamIds.GetValueOrDefault(s), names.GetValueOrDefault(s, $"slot {s}"),
+            (int)(a.t0 * CsDemoParser.TickRate), tEnd - a.t0, nWays, laps,
+            dwells[dwells.Count / 2], stable,
+            string.Join("|", wayYaw.Select(y => ((int)MathF.Round(y)).ToString(CultureInfo.InvariantCulture)))));
+    }
+
+    void RotTick(int s, float tNow, Vector3 pos, float yaw, bool alive)
+    {
+        if (!alive || tNow - roundStartTime < RotFreezeSkipS)
+        { if (rotAnchor.ContainsKey(s)) RotCloseEpisode(s, tNow); return; }
+
+        if (!rotAnchor.TryGetValue(s, out var a)) { rotAnchor[s] = (pos, tNow); rotHolds.Remove(s); rotDwell.Remove(s); return; }
+        if (Vector3.Distance(pos, a.pos) > RotAnchorU)
+        { RotCloseEpisode(s, tNow); rotAnchor[s] = (pos, tNow); return; }
+
+        if (rotDwell.TryGetValue(s, out var d))
+        {
+            float dy = yaw - d.yaw0; dy -= 360f * MathF.Round(dy / 360f);
+            if (MathF.Abs(dy) <= RotDwellBandDeg) { rotDwell[s] = (d.yaw0, d.sum + d.yaw0 + dy, d.n + 1, d.t0); return; }
+            RotCloseDwell(s, tNow);
+        }
+        rotDwell[s] = (yaw, yaw, 1, tNow);
     }
 
     demo.Source1GameEvents.PlayerHurt += e =>
@@ -1256,6 +1467,8 @@ static async Task<(List<PlayerResult> players, List<ShotRow> shots, List<KillRow
                 new ViewAngles(pw.EyeAngles.Pitch, pw.EyeAngles.Yaw, pw.EyeAngles.Roll),
                 Vector3.Zero, OnGround: true, Alive: p.PawnIsAlive));
 
+            RotTick(s, now, new Vector3(pw.Origin.X, pw.Origin.Y, pw.Origin.Z), pw.EyeAngles.Yaw, p.PawnIsAlive);
+
             // Anti-aim reads the player's OWN angles per tick (fake pitch / alternating yaw jitter).
             Report(antiAim, antiAim.OnPoll(tr, now));
 
@@ -1317,6 +1530,71 @@ static async Task<(List<PlayerResult> players, List<ShotRow> shots, List<KillRow
             // "when did the attacker LAST legitimately see this enemy" needs whole-round memory.
             for (ulong bits = packed; bits != 0; bits &= bits - 1)
                 lastSpottedAt[(System.Numerics.BitOperations.TrailingZeroCount(bits), s)] = now;
+
+            // Rising edge: which enemies just got their FIRST sight of this pawn? Anchor a reaction
+            // encounter for each — where was the observer's crosshair when the stimulus appeared,
+            // had it already been converging (pre-edge), and how long until it arrives (post-edge).
+            ulong rose = packed & ~prevMask.GetValueOrDefault(s);
+            prevMask[s] = packed;
+            if (rose != 0 && p.PawnIsAlive)
+            {
+                var vPos = new Vector3(pw.Origin.X, pw.Origin.Y, pw.Origin.Z);
+                for (ulong bits = rose; bits != 0; bits &= bits - 1)
+                {
+                    int obs = System.Numerics.BitOperations.TrailingZeroCount(bits);
+                    if (!teams.TryGetValue(obs, out var ot) || ot == t) continue;
+                    if (!trackers.TryGetValue(obs, out var oTr) || !oTr.TryLatest(out var oNow) || !oNow.Alive) continue;
+
+                    var oEye = oNow.Origin + new Vector3(0f, 0f, 64f);
+                    float errEdge = Geometry.NearestBodyAimError(oEye, oNow.Angles, vPos);
+                    if (errEdge > EncMaxEdgeDeg) continue;
+
+                    // Pre-edge convergence: aim error ~300ms ago minus at the edge, positions paired
+                    // by sequence so both are read at the same tick. Positive = already closing in.
+                    float preConv = 0f;
+                    int back = (int)(EncPreWindowS * CsDemoParser.TickRate);
+                    if (oTr.Count > back && tr.TryGetBySequence(oNow.Sequence - back, out var vOld))
+                    {
+                        var oOld = oTr[back];
+                        if (oOld.Alive && vOld.Alive && oNow.Sequence - oOld.Sequence == back)
+                            preConv = Geometry.NearestBodyAimError(
+                                oOld.Origin + new Vector3(0f, 0f, 64f), oOld.Angles, vOld.Origin) - errEdge;
+                    }
+
+                    float vSpd = 0f;
+                    if (tr.Count >= 2)
+                    { float dtv = tr[0].Time - tr[1].Time; if (dtv > 0f) vSpd = Vector3.Distance(tr[0].Origin, tr[1].Origin) / dtv; }
+
+                    pendingEnc.Add(new PendingEnc(obs, s, now, demo.CurrentDemoTick.Value, errEdge, preConv,
+                        VictimAudibleTo(s, oNow.Origin, now, vSpd), SmokeBlocks(oEye, vPos, now), vSpd));
+                }
+            }
+        }
+
+        // Advance pending encounters every tick: record latency when the aim arrives, or close the
+        // row as never-engaged (-1) when the watch window expires or someone dies.
+        for (int i = pendingEnc.Count - 1; i >= 0; i--)
+        {
+            var pe = pendingEnc[i];
+            if (!trackers.TryGetValue(pe.Obs, out var oT) || !oT.TryLatest(out var oS) ||
+                !trackers.TryGetValue(pe.Victim, out var vT) || !vT.TryLatest(out var vS))
+            { pendingEnc.RemoveAt(i); continue; }
+
+            float latency = -1f;
+            bool done2 = false;
+            if (oS.Alive && vS.Alive)
+            {
+                float err = Geometry.NearestBodyAimError(oS.Origin + new Vector3(0f, 0f, 64f), oS.Angles, vS.Origin);
+                if (err <= EncOnDeg) { latency = (now - pe.T0) * 1000f; done2 = true; }
+            }
+            if (!done2 && oS.Alive && vS.Alive && now - pe.T0 <= EncWatchS) continue;   // keep watching
+
+            encounterRows.Add(new EncounterRow(
+                steamIds.GetValueOrDefault(pe.Obs), names.GetValueOrDefault(pe.Obs, $"slot {pe.Obs}"),
+                steamIds.GetValueOrDefault(pe.Victim), names.GetValueOrDefault(pe.Victim, $"slot {pe.Victim}"),
+                roundNumber, pe.Tick, latency, pe.ErrAtEdge, pe.PreConvergeDeg, pe.VictimSpeed,
+                pe.Audible, pe.SmokeNearRay));
+            pendingEnc.RemoveAt(i);
         }
 
         if (now - lastPoll < pollInterval) return;
@@ -1498,11 +1776,22 @@ static async Task<(List<PlayerResult> players, List<ShotRow> shots, List<KillRow
                     float lag = now - past.Time;
                     if (lag >= 1.0f && lag <= 2.5f && past.Alive)
                     {
-                        unseenSamples[slot] = unseenSamples.GetValueOrDefault(slot) + 1;
-                        if (err <= UnseenAimDeg)
-                            unseenNow[slot] = unseenNow.GetValueOrDefault(slot) + 1;
-                        if (Geometry.NearestBodyAimError(eye, angles, past.Origin) <= UnseenAimDeg)
-                            unseenPast[slot] = unseenPast.GetValueOrDefault(slot) + 1;
+                        // Smoke gate (the Camz false positive): an enemy moving behind a smoke the
+                        // observer legitimately watches produces pure present-only samples — the
+                        // crosshair holds the smoke while the enemy crosses it unspotted. A sample
+                        // with a smoke on either ray carries no wallhack information; drop it.
+                        if (SmokeBlocks(eye, feet, now) || SmokeBlocks(eye, past.Origin, now))
+                        {
+                            smokeGatedSamples++;
+                        }
+                        else
+                        {
+                            unseenSamples[slot] = unseenSamples.GetValueOrDefault(slot) + 1;
+                            if (err <= UnseenAimDeg)
+                                unseenNow[slot] = unseenNow.GetValueOrDefault(slot) + 1;
+                            if (Geometry.NearestBodyAimError(eye, angles, past.Origin) <= UnseenAimDeg)
+                                unseenPast[slot] = unseenPast.GetValueOrDefault(slot) + 1;
+                        }
                     }
                 }
 
@@ -1627,6 +1916,44 @@ static async Task<(List<PlayerResult> players, List<ShotRow> shots, List<KillRow
         }
     }
 
+    // Aim-onset vs visibility: the per-encounter reaction cloud, plus the PRECOG list — encounters
+    // where the aim was already converging on a SILENT, unsmoked enemy BEFORE the rising edge.
+    if (printBlocks && encounterRows.Count > 0)
+    {
+        var engaged = encounterRows.Where(r => r.LatencyMs >= 0f && r.ErrAtEdgeDeg > EncOnDeg).ToList();
+        Console.WriteLine($"\n=== aim-onset vs visibility ({Path.GetFileName(file)}): {encounterRows.Count} edges, " +
+                          $"{engaged.Count} engaged, {smokeGatedSamples} null-samples smoke-gated ===");
+        if (engaged.Count > 0)
+        {
+            var lat = engaged.Select(r => r.LatencyMs).OrderBy(x => x).ToList();
+            Console.WriteLine($"  latency cloud: n={lat.Count}  p10 {lat[(int)(0.1 * (lat.Count - 1))]:F0}ms  " +
+                              $"p50 {lat[lat.Count / 2]:F0}ms  p90 {lat[(int)(0.9 * (lat.Count - 1))]:F0}ms");
+        }
+        var precog = encounterRows.Where(r => !r.Audible && !r.SmokeNearRay && r.PreConvergeDeg >= 5f).ToList();
+        foreach (var r in precog.OrderByDescending(r => r.PreConvergeDeg).Take(12))
+            Console.WriteLine($"  [PRECOG] {r.ObsName,-18} -> {r.VictimName,-14} r{r.Round} tick {r.Tick}  " +
+                              $"closed {r.PreConvergeDeg,5:F1}deg BEFORE visible  (edge {r.ErrAtEdgeDeg:F1}deg, " +
+                              $"lat {(r.LatencyMs >= 0 ? $"{r.LatencyMs:F0}ms" : "never")}, vSpd {r.VictimSpeed:F0})");
+        foreach (var grp in precog.GroupBy(r => r.ObsId).Where(g => g.Count() >= 3).OrderByDescending(g => g.Count()))
+            Console.WriteLine($"  [REPEAT] {grp.First().ObsName,-18} {grp.Count()} pre-visible convergences on silent enemies this demo");
+    }
+
+    // Rotation episodes: the smacke-loop measurement. No flags — the loop is skill; this prints
+    // the population so the fingerprint/coverage layers can be read off it later.
+    if (printBlocks && rotationRows.Count > 0)
+    {
+        Console.WriteLine($"\n=== rotation holds ({Path.GetFileName(file)}): {rotationRows.Count} episodes " +
+                          $"(>=2 ways, >=2 laps, stationary >={RotMinEpisodeS:F0}s) ===");
+        foreach (var r in rotationRows.Where(r => r.NWays >= 3).OrderByDescending(r => r.Laps).Take(10))
+            Console.WriteLine($"  [ROT] {r.Name,-18} {r.NWays} ways x {r.Laps} laps  dwell {r.MedianDwellMs,4:F0}ms  " +
+                              $"stability {r.Stability:F2}  {r.DurS,4:F1}s  tick {r.TickStart}  yaws {r.WayYaws}");
+        foreach (var grp in rotationRows.GroupBy(r => r.SteamId).Where(g => g.Count() >= 2)
+                                        .OrderByDescending(g => g.Sum(r => r.Laps)))
+            Console.WriteLine($"    {grp.First().Name,-20} {grp.Count()} episodes  " +
+                              $"medianDwell {grp.OrderBy(r => r.MedianDwellMs).ElementAt(grp.Count() / 2).MedianDwellMs:F0}ms  " +
+                              $"maxWays {grp.Max(r => r.NWays)}  totLaps {grp.Sum(r => r.Laps)}");
+    }
+
     // Head-precision floor: per player, the distribution of head-center aim error at fire.
     // human = broad hump ~0.3-1deg; raw aimbot = spike at <=0.05deg (one quant step is 0.044).
     // The spike SHARE is the statistic (mixture-robust: a toggler's legit shots cannot dilute it).
@@ -1677,7 +2004,7 @@ static async Task<(List<PlayerResult> players, List<ShotRow> shots, List<KillRow
         spinHsKills.GetValueOrDefault(kv.Key),
         signals.Where(s => s.Key.slot == kv.Key).ToDictionary(s => s.Key.detector, s => s.Value)))
         .ToList();
-    return (playerRows, shots, kills, hurtRows);
+    return (playerRows, shots, kills, hurtRows, encounterRows, rotationRows);
 }
 
 internal readonly record struct ShotRow(
@@ -1708,6 +2035,26 @@ internal readonly record struct HurtRow(
     ulong AttackerId, string AttackerName, ulong VictimId,
     int Round, int Tick, string Weapon, int Dmg,
     float DistU, int Candidates, float MinErrDeg, int BurstOpener);
+
+// One row per stationary rotation episode (>=2 laps over >=2 ways): the smacke-loop measurement.
+// wayYaws = the clustered hold angles pipe-joined, e.g. "12|94|187|265" — order + rhythm are the
+// fingerprint; nothing in this row flags on its own.
+internal readonly record struct RotationRow(
+    ulong SteamId, string Name, int TickStart, float DurS, int NWays, int Laps,
+    float MedianDwellMs, float Stability, string WayYaws);
+
+// One row per unseen->seen rising edge: the aim-onset-vs-visibility measurement. latencyMs -1 =
+// the aim never arrived within the watch window (or someone died first). preConvergeDeg = degrees
+// the aim closed toward the (still hidden) enemy in the 300ms BEFORE the edge — the precog axis.
+internal readonly record struct EncounterRow(
+    ulong ObsId, string ObsName, ulong VictimId, string VictimName,
+    int Round, int Tick, float LatencyMs, float ErrAtEdgeDeg, float PreConvergeDeg,
+    float VictimSpeed, bool Audible, bool SmokeNearRay);
+
+// In-flight encounter between the rising edge and the aim's arrival (or expiry).
+internal readonly record struct PendingEnc(
+    int Obs, int Victim, float T0, int Tick, float ErrAtEdge, float PreConvergeDeg,
+    bool Audible, bool SmokeNearRay, float VictimSpeed);
 
 internal readonly record struct KillRow(
     ulong AttackerId, string AttackerName, ulong VictimId, string VictimName,
