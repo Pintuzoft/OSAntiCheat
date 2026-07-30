@@ -1446,3 +1446,12 @@ bättre baslinjer); det intressanta är hålen vi INTE täcker:
 **Designidé värd att låna (koncept):** deras doubletap bär "network safety evidence" —
 ping/jitter/loss/choke kan VETOA en detektion. Anti-FP-mönster som borde generaliseras till
 alla våra timing-känsliga axlar (snap, triggerbot, silent): lagg-evidens dämpar, aldrig fäller.
+
+**Tyst-incidenterna granskade (2026-07-29, kontextreplay):** 1 legit med ny lärdom —
+observern **skadade fienden aktivt** under tracken (molotov-burn = ljud/lågor/feedback) →
+[ ] exculperings-gate "pågående damage på målet = infokanal" (PlayerHurt finns). 1 detektor-
+artefakt — **stationär fiende + observerns egen rörelse** genererar bäringssvepet (bäring är
+observer-relativ) → [ ] `WallhackMinEnemyMoveUnits` från 0 till uppmätt värde (~100 u?),
+exponera parametern i Sweep-svepet först. 1 suspect-notering (n=1, detaljer i private).
+Nettoresultat: även de sista 3 "supersignalerna" var 2/3 förklarliga — kvarvarande äkta
+FP-frekvens efter båda fixarna: potentiellt 1 signal på 313 sessioner.
