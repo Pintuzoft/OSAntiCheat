@@ -74,8 +74,11 @@ if [ "$bake_all" = 1 ]; then
     # Skip 3D-skybox sub-maps and editor/prefab scenes: they list as maps but carry no
     # world physics (instant BAKE FAILED noise). Explicitly named maps bypass the filter.
     maps=()
+    # First full server run (141 maps): the only failures were sky helper scenes (name suffix
+    # _sky, or under sky/) and UI icon-generation scenes (ui/) — no world physics, so exclude
+    # them too. A FAILED line should always be worth reading.
     while IFS= read -r m; do maps+=("$m"); done < <(printf '%s\n' "${!map_to_vpk[@]}" \
-        | grep -viE 'skybox|3d_?sky|^prefabs/|/prefabs/|^editor/|^lobby_|^glass_test$|^dynamic$' | sort)
+        | grep -viE 'skybox|3d_?sky|_sky$|^sky/|^ui/|^prefabs/|/prefabs/|^editor/|^lobby_|^glass_test$|^dynamic$' | sort)
     echo "== --all: baking ${#maps[@]} maps"
 fi
 
