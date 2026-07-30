@@ -50,6 +50,62 @@ public class NullTestDetectorTests
     }
 
     [Fact]
+    public void Map_artifact_inflating_everyone_is_suppressed_by_the_population_baseline()
+    {
+        // Night-map scenario (live 2026-07-30): spotted state is unreliable, so EVERY player's
+        // present-bias inflates identically (rate 0.75, absolute z crosses 3 for all of them).
+        // Round-robin feeding builds the peer baseline alongside each player's own counts; once
+        // the rest-of-population evidence is in, nobody stands out from it → nobody emits.
+        var d = new NullTestDetector(minObservations: 30, minZ: 3f, minPopObservations: 200);
+
+        Signal? fired = null;
+        for (int round = 0; round < 30; round++)
+            for (int slot = 0; slot < 10; slot++)
+            {
+                var s = d.Accumulate(slot, round * 0.05f, nowOnly: 3, pastOnly: 1);
+                if (s is not null) fired = s;
+            }
+
+        Assert.Null(fired);
+    }
+
+    [Fact]
+    public void A_cheater_standing_out_from_an_inflated_population_still_fires()
+    {
+        // Same inflated map, but one player's present-bias EXCEEDS the population's (rate 1.0
+        // vs peers' 0.75). The two-proportion z sees the excess and the signal survives the gate.
+        var d = new NullTestDetector(minObservations: 30, minZ: 3f, minPopObservations: 200);
+
+        Signal? cheaterSignal = null;
+        for (int round = 0; round < 30; round++)
+        {
+            for (int slot = 1; slot < 10; slot++)
+                Assert.Null(d.Accumulate(slot, round * 0.05f, nowOnly: 3, pastOnly: 1));
+            var s = d.Accumulate(0, round * 0.05f, nowOnly: 10, pastOnly: 0);
+            if (s is not null) cheaterSignal = s;
+        }
+
+        Assert.NotNull(cheaterSignal);
+        Assert.Equal(0, cheaterSignal!.Value.PlayerSlot);
+    }
+
+    [Fact]
+    public void Reset_clears_the_population_baseline_with_the_players()
+    {
+        // Build a big peer baseline, then Reset (map change). A lone asymmetric player on the
+        // new map must fall back to the absolute test (thin population) and fire — the old
+        // map's population must not gate the new map.
+        var d = new NullTestDetector(minObservations: 30, minZ: 3f, minPopObservations: 200);
+        for (int round = 0; round < 10; round++)
+            for (int slot = 1; slot < 10; slot++)
+                d.Accumulate(slot, round * 0.05f, nowOnly: 3, pastOnly: 1);
+
+        d.Reset();
+
+        Assert.NotNull(d.Accumulate(0, 0f, nowOnly: 25, pastOnly: 5));
+    }
+
+    [Fact]
     public void Escalates_once_per_z_band_rather_than_every_poll()
     {
         var d = new NullTestDetector(minObservations: 30, minZ: 3f);

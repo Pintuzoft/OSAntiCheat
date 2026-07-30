@@ -245,9 +245,13 @@ public sealed class OSAntiCheatConfig : BasePluginConfig
     public float WallhackMinTrackSeconds { get; set; } = 0.4f;
 
     /// <summary>Units the enemy must move while tracked. The aim must also FOLLOW that movement,
-    /// so a held angle an enemy crosses no longer flags (the main live-data false positive).</summary>
+    /// so a held angle an enemy crosses no longer flags (the main live-data false positive).
+    /// A near-stationary enemy is excluded because bearing is observer-relative: the observer's
+    /// OWN movement generates a bearing sweep past a standing enemy, which is not tracking.
+    /// 100 measured on the 21-demo corpus: legit noise −23% while every cheater signal survives;
+    /// 150+ starts eating true positives.</summary>
     [JsonPropertyName("WallhackMinEnemyMoveUnits")]
-    public float WallhackMinEnemyMoveUnits { get; set; } = 0f;
+    public float WallhackMinEnemyMoveUnits { get; set; } = 100f;
 
     /// <summary>Degrees of bearing the enemy must sweep across the observer's view. Small arcs
     /// (5-15 deg) are crosshair micro-jitter, not tracking — keep this well above them.</summary>
@@ -330,4 +334,14 @@ public sealed class OSAntiCheatConfig : BasePluginConfig
     /// </summary>
     [JsonPropertyName("NullTestMinZ")]
     public float NullTestMinZ { get; set; } = 3.0f;
+
+    /// <summary>
+    /// Rest-of-population discordant observations required before the population-relative gate
+    /// engages. Live data showed absolute z is map-dependent (night-variant maps inflate the whole
+    /// population), so a player must ALSO stand out from the concurrent map population (two-
+    /// proportion z ≥ NullTestMinZ) once this much peer evidence exists. Below it, the absolute
+    /// test runs alone. The gate only ever suppresses emissions — never adds them.
+    /// </summary>
+    [JsonPropertyName("NullTestMinPopObservations")]
+    public int NullTestMinPopObservations { get; set; } = 200;
 }

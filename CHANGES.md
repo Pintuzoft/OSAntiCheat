@@ -4,6 +4,35 @@ Version history for OSAntiCheat, newest first. Every release gets an entry here;
 describes the current state only. Player/admin names follow the pseudonym scheme from
 [TODO.md](TODO.md) (Cn = typed cheater, Gn = griefer, Rn = regular, An = admin).
 
+## v0.9.5 — population-relative null test + measured min-enemy-move gate
+
+Two fixes read straight out of the first accumulated live log after the geo deploy
+(2026-07-25→30: 2,366 signals, all of them wallhack.nulltest/track — six live days with zero
+Tier-1 events, the measured-zero baselines hold).
+
+- **wallhack.nulltest — per-map population baseline.** The absolute McNemar z proved
+  map-dependent: night-variant maps inflate the *whole population* (median z 10.0 and 7.0 vs
+  ~5 on every normal map; several regulars simultaneously at z 19–22 in the same session), most
+  plausibly because spotted state is unreliable on the dark community remakes — an enemy the
+  observer genuinely sees still counts as "unspotted", so everyone "tracks the present". The fix
+  is the project's standing principle instead of hardcoded map lists: once the rest of the map's
+  population has ≥ `NullTestMinPopObservations` (default 200) discordant samples, emission also
+  requires a two-proportion z ≥ `NullTestMinZ` of the player's present-rate **over everyone
+  else's**. A map artifact hits both sides equally and cancels; the gate can only ever suppress,
+  never add, and with a thin population the absolute test runs alone (pre-v0.9.5 behaviour).
+  Evidence is per-map: the detector now resets on map change. Replayed offline against the
+  worst live night-map session (pooled population present-rate 0.68 vs ~0.5 normal), the
+  baseline silences it.
+
+- **wallhack.track — `WallhackMinEnemyMoveUnits` 0 → 100, measured.** The quiet-incident review
+  had already identified the artifact: bearing is observer-relative, so the observer's *own*
+  movement sweeps the bearing past a standing enemy and the view "follows" it — 10 of 204 live
+  geo signals had enemy movement 0u. Swept 0/25/50/75/100/150/200 over the 21-demo corpus
+  (`tools/Sweep --minmove`, GEO+TEAM arm): at 100 the legit sessions with a signal drop 13→10
+  (signals 14→11) while **every** cheater signal survives (0.47 and 1.23 sig/min unchanged);
+  150 eats a true cheater signal, 200 eats them all. 100 is the knee — exactly where legit
+  noise stops improving for free.
+
 ## v0.9.4 — geometric LOS gate for wallhack.track (CS2FOW BVH8 bakes)
 
 `src/Visibility/` — C# port of CS2FOW's `.bvh8` reader and segment raycaster (MIT, pinned to

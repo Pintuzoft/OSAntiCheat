@@ -36,7 +36,7 @@ public sealed class WallhackDetector : IDetector
     // Defaults come from a parameter sweep against demos containing three admin-banned
     // cheaters plus their matches' legit players — not from guesswork. See tools/Sweep.
     public WallhackDetector(
-        float minTrackSeconds = 0.4f, float minEnemyMoveUnits = 0f,
+        float minTrackSeconds = 0.4f, float minEnemyMoveUnits = 100f,
         float minBearingChangeDeg = 20f, float followFraction = 0.5f,
         float minBearingRateDegPerSec = 10f)
     {

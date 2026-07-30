@@ -96,7 +96,9 @@ public sealed class OSAntiCheatPlugin : BasePlugin, IPluginConfig<OSAntiCheatCon
         _wallhackGaze = new WallhackGazeDetector(
             config.WallhackGazeConeDeg, config.WallhackGazeTriggerScore,
             config.WallhackGazeRoundStartMultiplier);
-        _nullTest = new NullTestDetector(config.NullTestMinObservations, config.NullTestMinZ);
+        _nullTest = new NullTestDetector(
+            config.NullTestMinObservations, config.NullTestMinZ,
+            minPopObservations: config.NullTestMinPopObservations);
     }
 
     public override void Load(bool hotReload)
@@ -345,6 +347,10 @@ public sealed class OSAntiCheatPlugin : BasePlugin, IPluginConfig<OSAntiCheatCon
     private void LoadBakeForMap(string mapName)
     {
         _geoCache.Clear();
+        // Null-test evidence is per-map by design: the population baseline that gates emissions
+        // measures THIS map's spotted-system behaviour, and per-player counts contaminated by a
+        // map artifact (night maps) must not follow players to the next map.
+        _nullTest.Reset();
         if (string.IsNullOrWhiteSpace(Config.BakesDir))
         {
             _bake.Clear();

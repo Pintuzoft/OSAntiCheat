@@ -39,6 +39,7 @@ if (args.Length < 1)
 Combo? evalCombo = null;
 string? bakesDir = null;
 string? geoDumpPath = null;
+float[] minMoves = [];
 var inputs = new List<string>();
 for (int i = 0; i < args.Length; i++)
 {
@@ -46,6 +47,14 @@ for (int i = 0; i < args.Length; i++)
     {
         var p = args[++i].Split(',').Select(s => float.Parse(s, System.Globalization.CultureInfo.InvariantCulture)).ToArray();
         evalCombo = new Combo(p[0], p[1], p[2], p[3], p[4]);
+        continue;
+    }
+    // --minmove 0,50,100  => in eval mode, additionally report the GEO+TEAM arm under each
+    // WallhackMinEnemyMoveUnits value. Measures the fix for the observer-motion artifact
+    // (stationary enemy + moving observer generates the bearing sweep, TODO 2026-07-29).
+    if (args[i] == "--minmove" && i + 1 < args.Length)
+    {
+        minMoves = args[++i].Split(',').Select(s => float.Parse(s, System.Globalization.CultureInfo.InvariantCulture)).ToArray();
         continue;
     }
     if (args[i] == "--bakes" && i + 1 < args.Length)
@@ -86,9 +95,9 @@ if (evalCombo is { } ec)
     // Quiet = below footstep speed: the enemy emits no sound cue while tracked.
     const float QuietSpeed = 120f;
     static int CountSignals(int slot, Obs[] obs, Combo c, bool geoGated, bool teamGated,
-        bool quietGated = false, List<Obs>? signalObs = null)
+        bool quietGated = false, List<Obs>? signalObs = null, float minMove = 0f)
     {
-        var det = new WallhackDetector(c.TrackSeconds, 0f, c.BearingChange, c.FollowFraction, c.BearingRate);
+        var det = new WallhackDetector(c.TrackSeconds, minMove, c.BearingChange, c.FollowFraction, c.BearingRate);
         int signals = 0;
         foreach (var o in obs)
         {
@@ -159,6 +168,35 @@ if (evalCombo is { } ec)
                           $"legit >= lowest cheater: {above} / {legits.Count}; legit sessions with any signal: {noisy}");
         Console.WriteLine($"    cheaters: {string.Join(", ", cheats.OrderByDescending(Rate).Select(c => $"{c.name}={Rate(c):F2}"))}");
         Console.WriteLine($"    legit max/median: {legits.Max(Rate):F2} / {Rate(legits.OrderBy(Rate).ElementAt(legits.Count / 2)):F2}");
+    }
+
+    // Min-enemy-move axis: rerun the live gate arm (GEO+TEAM) under each candidate value of
+    // WallhackMinEnemyMoveUnits. What we want to see: legit noise (observer-motion artifact)
+    // drops while the cheaters' rates hold — the value where legit stops improving is the gate.
+    if (minMoves.Length > 0)
+    {
+        Console.WriteLine("\n=== GEO+TEAM arm under WallhackMinEnemyMoveUnits sweep ===");
+        Console.WriteLine("  minMove  legit-sessions-w-signal  legit-max/min  legit-signals  cheaters");
+        foreach (float mm in minMoves)
+        {
+            var rows = new List<(float rate, int signals, bool cheater, string name)>();
+            foreach (var k in cases)
+            {
+                if (!k.HasBake) continue;
+                foreach (var (slot, obs) in k.BySlot)
+                {
+                    float minutes = k.AlivePolls.GetValueOrDefault(slot) * 0.05f / 60f;
+                    if (minutes < 0.5f) continue;
+                    int n = CountSignals(slot, obs, ec, geoGated: true, teamGated: true, minMove: mm);
+                    rows.Add((n / minutes, n, slot == k.CheaterSlot, k.Names.GetValueOrDefault(slot, "?")));
+                }
+            }
+            var legit = rows.Where(r => !r.cheater).ToList();
+            var cheat = rows.Where(r => r.cheater).ToList();
+            Console.WriteLine($"  {mm,7:F0}  {legit.Count(r => r.signals > 0),23}  {legit.Max(r => r.rate),13:F2}  " +
+                              $"{legit.Sum(r => r.signals),13}  " +
+                              string.Join(", ", cheat.OrderByDescending(r => r.rate).Select(r => $"{r.name}={r.rate:F2} ({r.signals})")));
+        }
     }
     return 0;
 }

@@ -1451,7 +1451,33 @@ alla våra timing-känsliga axlar (snap, triggerbot, silent): lagg-evidens dämp
 observern **skadade fienden aktivt** under tracken (molotov-burn = ljud/lågor/feedback) →
 [ ] exculperings-gate "pågående damage på målet = infokanal" (PlayerHurt finns). 1 detektor-
 artefakt — **stationär fiende + observerns egen rörelse** genererar bäringssvepet (bäring är
-observer-relativ) → [ ] `WallhackMinEnemyMoveUnits` från 0 till uppmätt värde (~100 u?),
-exponera parametern i Sweep-svepet först. 1 suspect-notering (n=1, detaljer i private).
+observer-relativ) → [x] `WallhackMinEnemyMoveUnits` från 0 till uppmätt värde: **100 u
+(v0.9.5)** — `Sweep --minmove 0..200` över 21-demo-korpusen: vid 100 faller legit-sessionerna
+13→10 med VARJE fuskarsignal intakt (0.47/1.23 sign/min oförändrade); 150 äter en äkta signal,
+200 äter alla. 100 är knät. 1 suspect-notering (n=1, detaljer i private).
 Nettoresultat: även de sista 3 "supersignalerna" var 2/3 förklarliga — kvarvarande äkta
 FP-frekvens efter båda fixarna: potentiellt 1 signal på 313 sessioner.
+
+## NATTKARTS-ARTEFAKTEN: nulltest-z är kartberoende → populationsbaseline — 2026-07-30
+
+Första ackumulerade liveloggen efter geo-deployen (2026-07-25→30, 2 366 signaler) gav tre
+resultat:
+
+1. **Geo-gatade wallhack.track fungerar i drift**: alla 204 track-signaler geo-gatade, 27
+   mappar (bake-on-map-load håller), 54 spelare, toppade av kända regulars. Ingen
+   spelare-kartsession når trovärdigt ≥0.2 sign/min-tröskeln (tätast: n=4 på en karta,
+   0.16–0.49/min beroende på närvaro-antagande). Livebrusgolvet matchar offline-experimentets.
+   Sex livedagar med NOLL Tier-1-signaler — de uppmätta noll-baslinjerna håller.
+2. **Nattkartor inflaterar nulltest för ALLA**: median-z per karta ~5 på normala mappar men
+   **10.0 på ena nattkartan (max 22!) och 7.0 på andra**; flera orelaterade regulars på z 19–22
+   i samma session → kartartefakt, inte spelare. Trolig mekanism: spotted sätts opålitligt på
+   mörka community-remakes → fiender man faktiskt SER räknas som "unspotted" → alla "trackar
+   nutiden". Poolad populations-present-rate 0.68 på nattsessionen vs ~0.5 normalt.
+3. **Fixen (v0.9.5) är projektprincipen, inte kartlistor**: när kartans övriga population har
+   ≥200 diskordanta samples krävs även två-proportions-z ≥ 3 av spelarens present-rate ÖVER
+   populationens. Artefakten slår båda sidor lika och kancellerar; gaten kan bara tysta, aldrig
+   lägga till; tunn population = absoluta testet ensamt (gamla beteendet). Evidensen är
+   per-karta (reset vid mapbyte). Offline-replay mot nattsessionen: baselinen tystar den;
+   kvarvarande residual = småsampel-outliers (aggressiva spelare tittar på synliga fiender
+   oftare — heterogenitet, inte suspects). Nattkartor förblir lägre förtroende för
+   informations-axlar tills spotted-beteendet verifierats där (css_osac_los på en nattkarta).
