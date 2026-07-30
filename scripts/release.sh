@@ -40,6 +40,14 @@ cp "$PUBLISH/$NAME.dll" "$STAGE/"
 cp "$ROOT/README.md" "$STAGE/" 2>/dev/null || true
 cp "$ROOT/LICENSE"   "$STAGE/" 2>/dev/null || true
 
+# Ship the server-side baker wrapper with the plugin: the geo gate is only as fresh as its
+# bakes, so the tool that produces them rides the same deploy pipeline (OSBase) as the code
+# that consumes them. Inert in plugins/ — CSSharp only loads dlls; the bake cron invokes it
+# from here with an OUTSIDE working/output dir (bakes must not live in the OSBase-managed
+# folder, which is replaced on every update).
+cp "$ROOT/tools/bake-maps.sh" "$STAGE/" 2>/dev/null || true
+chmod +x "$STAGE/bake-maps.sh" 2>/dev/null || true
+
 # Archive as OSAntiCheat_v<version>.zip. Prefer `zip`, fall back to Python's zipfile.
 ARCHIVE="$ROOT/dist/${NAME}_v${VERSION}.zip"
 if command -v zip >/dev/null 2>&1; then

@@ -4,6 +4,22 @@ Version history for OSAntiCheat, newest first. Every release gets an entry here;
 describes the current state only. Player/admin names follow the pseudonym scheme from
 [TODO.md](TODO.md) (Cn = typed cheater, Gn = griefer, Rn = regular, An = admin).
 
+## v0.9.6 — bake-maps.sh ships in the release zip
+
+The server-side baker wrapper now rides the plugin's own deploy pipeline: the release zip
+gains `OSAntiCheat/bake-maps.sh`, so an OSBase-managed install always carries the tool that
+produces the bakes its geo gate consumes — no separate distribution channel to keep in sync
+(the server's bake cron was being automated via Puppet, and the plugin pipeline already
+existed). The script is inert in `plugins/` (CSSharp only loads dlls). Point the cron at it
+with the working/output dir OUTSIDE the plugin folder — that folder is replaced on every
+update, bakes and the baker download must live elsewhere:
+
+```
+0 6 * * * cd /home/cs2/osanticheat && bash .../counterstrikesharp/plugins/OSAntiCheat/bake-maps.sh <server-root> ./bakes --all >> bake.log 2>&1
+```
+
+Plugin code identical to v0.9.5.
+
 ## v0.9.5 — population-relative null test + measured min-enemy-move gate
 
 Two fixes read straight out of the first accumulated live log after the geo deploy

@@ -2,7 +2,7 @@
 
 ![status: experimental](https://img.shields.io/badge/status-experimental-orange)
 ![phase: calibration & data-gen](https://img.shields.io/badge/phase-calibration%20%26%20data--gen-blue)
-![version](https://img.shields.io/badge/version-0.9.5-informational)
+![version](https://img.shields.io/badge/version-0.9.6-informational)
 ![response: log--only](https://img.shields.io/badge/response-log--only-green)
 ![license: MIT](https://img.shields.io/badge/license-MIT-lightgrey)
 
