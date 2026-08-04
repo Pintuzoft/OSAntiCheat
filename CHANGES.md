@@ -4,6 +4,39 @@ Version history for OSAntiCheat, newest first. Every release gets an entry here;
 describes the current state only. Player/admin names follow the pseudonym scheme from
 [TODO.md](TODO.md) (Cn = typed cheater, Gn = griefer, Rn = regular, An = admin).
 
+## v0.9.7 — null test recalibrated against the first live-caught labelled cheater
+
+The live pipeline caught its first in-the-act positive (2026-08-04): **C7**, a self-admitted
+cheat user ("i use strafe.one crack" in chat), joined mid-map, teamknifed on arrival, renamed
+every round to dodge kick-by-name, and one-tapped 16 headshot kills of 17 with the revolver in
+4.3 alive-minutes. First signal ~1 minute after he joined; 9 `wallhack.track` + 10
+`wallhack.nulltest` signals in shadow. No mechanical Tier-1 event — his lag-window aim error
+sits under 1°, i.e. "legit"-style aim assist plus wall information. The information axis is
+the whole case, which is exactly what it exists for.
+
+Reading 5 days of post-v0.9.5 population shadow data against him exposed two null-test
+calibration errors, both now fixed by measurement:
+
+- **`NullTestMinObservations` 30 → 400.** The 20 Hz polls are autocorrelated — one engagement
+  produces an unbroken run of present-only discordant samples, so McNemar's independence
+  assumption fails at small n: legit regulars hit 97–100% present-rate on 30-sample windows
+  and z≈9 inside 20 seconds. At 400 the burst noise has washed out; C7 still passed 400
+  discordant samples within ~4 minutes of joining, so the gate costs little latency.
+- **New `NullTestWeight`, default 0.5.** Even at large n the present-bias is universally
+  *positive* for skilled players (sound + game sense aim you where unseen enemies are): on
+  large-n excess over the map population, C7 ranked only 4th–6th behind known regulars. The
+  axis corroborates — it must never reach Review alone.
+
+Validation: replaying the fusion engine over the whole 5-day live log, the previous defaults
+put **97** player-map-sessions at Review (96 of them known-legit regulars; C7 ranked 4th).
+The new defaults put exactly **one** session at Review — C7, simulated peak 3.09 — with the
+runner-up legit session at 2.4× lower score. Caveat honestly stated: the positive class is
+n=1 and the knobs were chosen on this window; the negative-class evidence (96 false Reviews
+eliminated across dozens of regulars) is what carries the change. `wallhack.track` separated
+on both paths independently: 2.1 signals/min for C7 vs ~0.1/min field maximum in full
+sessions. Both axes stay shadowed — this release makes the null test *eligible* to graduate,
+it does not graduate it.
+
 ## v0.9.6 — bake-maps.sh ships in the release zip
 
 The server-side baker wrapper now rides the plugin's own deploy pipeline: the release zip

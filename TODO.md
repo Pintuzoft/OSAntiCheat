@@ -1372,112 +1372,187 @@ Vallgraven är DATA (arkivet, baslinjerna, labels), inte hemligheter — men tv�
   (metod öppen alltid; siffror kanske avrundat/intervall). Modell-lagret (norra stjärnan) är
   slutsvaret — beslutsgränser i vikter går inte att läsa sig till.
 
-## ⭐ VISIBILITY-ORACLE (CS2FOW BVH8) + GEO-GATE-EXPERIMENTET — 2026-07-28/29
+## Helgfisket 25–27/7: burst-outliers → två friade av granskning → reaktionsaxeln byggd — 2026-07-27
 
-CS2FOW (github.com/karola3vax/CS2FOW, MIT) är ett open source server-side anti-wallhack-plugin
-(occlusion culling i CheckTransmit — prevention, komplementärt till vår detection). Vi porterade
-deras `.bvh8`-läsare + segment-raycaster till C# (`src/Visibility/`, `tools/VisOracle`), pinnad
-till format v3/recipe 1, differentiellt verifierad **bit-identisk** mot deras C++/AVX på 400k
-slumpsegment (dust2+mirage, officiella bakes). ~1.6 µs/query skalärt, ~130 ms att ladda dust2.
-Bakes är Valve-deriverad data (egen DATA_NOTICE) — gitignorade (`*.bvh8`), aldrig i repot.
+**Share-omräkningen (z→andel, offline på live-JSONL) funkar som rankning:** populationen landar
+0.52–0.78 (median ~0.62), ägaren näst sist — helt enligt aim-forward-teorin. Sex spelare stack ut
+≥0.89 med spikneutrala arkiv-baslinjer (~0.50): Snuskungen 145/145, SmrtAsp 123/123, purrly 100/100
+(25/7), Camz 0.961, frodo 0.951 + track-träff, Poska 0.890 (26/7). ALLA burst-formade: hela
+bevismassan i 1–2 s-fönster (med C=0 blir z=√N — signalsekvenserna matchade exakt √30…√145, dvs
+noll diskordanta samples utanför bursten).
 
-**Bakning i drift:** `tools/bake-maps.sh` på gameservern — indexerar workshop-containrar via
-bakerns `--list-maps` (workshop-items är numeriska container-VPK:er med `maps/<map>.vpk` nästlad),
-bakar inkrementellt (manifest med container-fingerprint), arkiverar per käll-CRC
-(`archive/<map>-<crc>.bvh8` — historiska demos förblir versionsmatchbara). Uppmätt på 243 mappar:
-**median 1–2 s/map, värsting 19 s** → bake-on-map-load är gratis; morgon-cron föreslagen.
-Lärdom: map-uppdateringar kan byta internt mapnamn (kismayo → de_kismayo_cs2) och gamla
-map-versioner försvinner ur cachen — arkivet löser detta FRAMÅT, inte retroaktivt.
+**Ground truth från ägarens demo-granskning — båda friade, två nya confounds identifierade:**
+1. **frodo = LAGG.** Nulltest-bursten förklaras av lag-fryst vy + fiender i siktlinjen (ser ut som
+   parkerat sikte utan uppsåt). Kvarstår ändå: canals-skottet 25/4 (r13 tick 67187, AWP, fruset
+   3406 ms, blind 64/64, team-saw 0, gatedSig 0.153 = 6× hans näst högsta) — lagg träffar inte.
+   Identitetstvätt: [steamid]-som-namn → 1nvictu5 → frodo (namnbyte v.29), Estland-connect.
+2. **Camz = RÖK + LJUD.** Smoke-vakt (fiender genom rök = unspotted genom stillahållet sikte → ren
+   B-burst), hörn-peek (ser innan siktet rör sig = normal reaktionskedja), reload-ljud → höll vinkel.
+   Hans historiska killWallMax 0.259/0.206/0.192 får därmed rök-förbehåll — omvärdera EFTER rök-gate.
 
-**Geo-gate-experimentet (wallhack.track + "alla samplade kroppspunkter geometriskt skymda"):**
-21 demos, 313 sessioner, 16 mappar, 3 bannade fuskare. Aggregat:
-- Bäst samplade confident-fuskaren (multihack jan-20-cbble): 0.70 → **0.47 sign/min i geo-armen
-  (2/3 signaler bekräftade genom solid vägg), 4.3× över högsta legit i HELA populationen** (0.11).
-  Baseline-marginalen var ~1.5×.
-- Legit-brus: 44 baseline-signaler → 17/310 sessioner (5.5 %) med någon geo-signal, ingen >0.11/min.
-  Tröskel ≥0.2/min + ≥4 alive-min flaggar EXAKT en spelare i hela materialet: fuskaren.
-- zoo-fallet (feb-20): n=1-signal på 1.5 min dog i gaten — inconclusive, behöver fler demos.
-  kismayo-fallet (mar-10): signal ÖVERLEVDE gaten men map-versionen är fel (uppdaterad juli) →
-  exploratory, ej evidens. Asymmetrin håller design-riktningen: BLOCKED är stark (statisk vägg
-  blockerar på riktigt), CLEAR friar aldrig (dörrar/props/smoke okända för baken).
-**Fyrarmsresultatet (2026-07-29) — gate-stacken är avgjord:**
-| arm | legit-sessioner m. signal (av 310) | fuskarna |
-|---|---|---|
-| baseline (spotted-only) | 65 | 0.70 / 1.23 / 0.68 sign/min |
-| + geometriskt skymd (alla 6 kroppspunkter) | 17 (max 0.11/min) | 0.47 / 1.23 / 0 |
-| + lagbred ospottad (ingen radarprick) | 15 | oförändrade |
-| + tyst fiende ≤120 u/s (inga fotsteg) | 3 | **0 / 0 / 0** |
-- **Radar-hypotesen föll** (lagbred gate tog 2/17); ljud-hypotesen bekräftad: nästan alla
-  legit-överlevare trackade HÖRBART springande fiender (dump: korta avstånd, vertikala offsets =
-  fotstegs-tracking genom vägg/golv — legit gehör).
-- **Tyst-fiende är en VIKT, inte en gate:** som hård gate dödar den även fuskarnas signaler
-  (deras offer råkade springa — wallhackare trackar förstås hörbara fiender också). Rätt design:
-  hård gate = GEO+LAGBRED (Y kvar på 0.47 = 4.3× max legit); geo+lagbred+TYST-signal är en
-  sällsynthetsförstärkare (3 st i 313 sessioner ≈ 1 %) som väger tungt i fusionen när den slår.
-- [ ] De TRE geo+lagbred+tyst-legit-incidenterna (n=1 vardera) förtjänar manuell demo-titt —
-      antingen interp-kanteffekter/galler (FP-städning) eller genuint suspekta enstaka incidenter.
-- [ ] NÄSTA BYGGE: geometriskt läge i wallhack.track/gaze live — bake-load vid map-load
-      (fail-safe av utan bake), gate GEO+LAGBRED, tyst-fiende som vikt, versionsvakt i
-      demo-analysen (demo-datum mot arkivets käll-CRC). Server-cron för morgonbakning + arkiv.
+**⭐ RÖK-CONFOUNDEN är nulltest-share-måttets största felkälla:** rök-gaten (v0, DemoReplay) slängde
+**117k samples i EN thera-demo**. Spotted flippar inte genom rök → varje rökgenomgång ger rena
+present-only-samples åt alla som (legitimt) vaktar röken. Trolig förklaring till flera av de sex
+bursterna. Lagg är #2 (plugin loggar INTE ping idag).
 
-## Idébank från CS2AC (karola3vax's detection-syskon till CS2FOW) — 2026-07-29
+**⭐ NY AXEL: aim-onset vs synlighet (ägarens idé från Camz-granskningen), v0 i DemoReplay:**
+per unseen→seen-kant: errAtEdge + preConvergeDeg (grader stängda mot dold fiende FÖRE kanten) +
+latencyMs (kant→sikte ≤3°). Ljudmodell: spring ≥140u/s ELLER skott ≤6 s ELLER **reload ≤4 s inom
+1400u** (reload-eventet = ny exkulperingskanal). Rök som sfär 150u på strålen. `--reactions out.csv`.
+- Thera-validering: latensmoln p50 172 ms (mänskligt), MEN precog-listan toppas av kända legit
+  (J5, A1, A2) — **v0-confound: egen peek = vyn vrider sig mot området när hörnet slutar
+  skymma** = "konvergens före synlighet" utan information. Aim-forward-läxan igen.
+- [ ] Precog v1: separera "vyn vred sig mot området" från "siktet FÖLJDE dold fiendes rörelse"
+      (kräv bearing-track eller stillastående observatör). Läs tröskeln av populationen.
+- [ ] Nulltest live: porta rök-gaten till pluginet (server känner smoke-entiteter; ray-sfär billig).
+- [ ] Signal-stämpla observatörens ping/loss (lagg-fall självdiagnosticerande — frodo-klassen).
+- [ ] Onset-debounce för SpottedByMask-latens (buffra ~300 ms, retro-släng vid snabb spotted-flip).
+- [ ] Kör om share-rankningen på serverns fulla arkiv MED rök-gate — överlever någon av de sex?
+      (Lokal 21-demo-körning + 20260718-nache pågår → private/replay-smokegated-20260727.csv +
+      reactions-20260727.csv. Nache-demon = G-fallets: testa om reaktionsaxeln ser G.)
+- Ogranskade i demo: Poska (2 bursts 13 s isär, nightfever 21:21, gototick 82550/83471),
+  SmrtAsp (okänd! nache 41608), Snuskungen (toscan 40796), purrly/åse/LettPurrly (nache 25849).
+- BanCheck väntar på Steam-nyckeln (KeePass): frodo + [steamid] + SmrtAsp prioriterade.
 
-[CS2AC](https://github.com/karola3vax/CS2AC): C++/Metamod, 17 regelbaserade detektorer,
-auto-punish, **AGPL-3.0 — idéer fria, kod får ALDRIG kopieras in i vårt MIT-repo.** Ingen
-publicerad FP-metodik — varje axel nedan börjar som alltid med arkiv-mätning av ärlig
-population, aldrig med deras trösklar. Aim-sviten överlappar det vi redan har (ofta med
-bättre baslinjer); det intressanta är hålen vi INTE täcker:
+## Detektor-koncept: per-hitbox-LOS → reveal-klassning + skymd-hitbox-följning (ägarens idé) — 2026-07-27
 
-**Movement (vi har noll movement-detektorer idag):**
-- [ ] **bhop/hyperscroll**: deras signal = perfekta landing→jump-kedjor (12 raka perfs),
-      perf-ratio i 30-hoppsfönster, och repetitiva input-MÖNSTER (≥90 % samma scrollmönster =
-      skript). CSSharp-nivå: hopp-knapp per tick finns i vår OnTick-sampling → perfekta
-      kedjor mätbara i tick-upplösning. Input-mönster-entropi kräver usercmd-access (se nedan).
-      Arkivet först: ärliga spelares perf-ratio-fördelning → var dör svansen?
-- [ ] **autostrafe**: hastighetsbevarande i luften över många hopp — position/velocity har vi.
+Kärnan: pinpointa VILKA hitboxar observatören kan se, inte bara binär spotted.
+1. **Ärlig t_synlig** = första synliga fragment (fot/axel) → reaktionsaxelns latens blir ren
+   (dagens SpottedByMask-släp ger omöjliga p10 16–31 ms).
+2. **Reveal-klassning:** kryp-runt-hörn (fragment växer långsamt) vs snabbpeek (0→hel <100 ms).
+   Olika legit-förväntan: snabbpeek KRÄVER reaktiv latens; kryp → siktet följer synliga delen.
+   Ägarens spel-sense: bra spelare söker av synligt + snabbpeekar sista vinkeln → långsamma
+   reveals är sällsynta högsignal-händelser.
+3. **Ny tell: sikte som FÖLJER skymd hitbox** medan annan är synlig (låst på dolda huvudets
+   faktiska position när bara foten syns). Skiljelinje mot crosshair placement: huvudhöjd-håll
+   vid hörnkant = STATISKT i världen (skicklighet); rörligt lås på skymd hitbox = information.
+   Samma "följer, inte förutser"-princip som precog v1:s bearing-track-krav.
+- [ ] Live v1: TraceRay eye→3 punkter (huvud/bröst/fötter), endast fiender nära FOV, poll-takt.
+- [ ] Offline: kräver kartgeometri ur VPK (vphys→trianglar→ray) = samma unlock som "ÄKTA LOS"-
+      punkten; ger retroaktiv per-hitbox-LOS över HELA arkivet. Stor men rätt investering.
 
-**Subtick/exploit (CS2-erans mekaniska fusk, kräver usercmd-nivå):**
-- [ ] **desubticking/subtick spam/invalid input**: läser usercmd:s subtick-moves — "when"-
-      fraktioner plattade till 0 (ratio ≥0.9), obalanserade knapp-events, input-bursts.
-      Kräver usercmd-hook: C++-plugin eller CSSharp-memory-lib — utred access-väg FÖRST.
-- [ ] **doubletap**: eldkommandon tätare än vapnets cykeltid — fire-ticks har vi redan i
-      events/demos → arkiv-mätbar IDAG utan ny access. Ren LogicBreach-kandidat.
+## ⭐ Detektor-koncept: sök-täckning + beteende-fingeravtryck (ägarens R18-observation) — 2026-07-27
 
-**Designidé värd att låna (koncept):** deras doubletap bär "network safety evidence" —
-ping/jitter/loss/choke kan VETOA en detektion. Anti-FP-mönster som borde generaliseras till
-alla våra timing-känsliga axlar (snap, triggerbot, silent): lagg-evidens dämpar, aldrig fäller.
+Ägaren kände igen R18 genom nick-byte ENBART på vinkelhållningen ("håller vinklar som R3") —
+serie-avsökning av alla möjliga fiende-vägar, clearar alla hörn/spots vid rum-övertag.
+1. **Sök-täckning ("scan efficiency") — FÖRSTA axeln där skicklighet pekar MOT fusket:** legit
+   köper information med bortkastade blickar (checkar TOMMA spots, nära basrate-träffkvot);
+   wallhackaren checkar bara bemannade (för effektiv). Tellen = var han ALDRIG tittar. Flagga =
+   låg sök-täckning + hög utdelning. Bryter "skill ⊇ tells"-taket — skickligare = lägre träffkvot.
+2. **Beteende-fingeravtryck för smurf/alias-tvätt:** scan-sekvens + pre-aim-höjder + spot-ordning
+   som per-spelare-signatur (R18-igenkänningen = existensbevis). Matcha nya konton mot stammisar
+   (frodo/1nvictu5-klassen).
+Kräver INGEN kartgeometri: spot-kartan LÄRS ur arkivet (kluster av håll/döds-positioner per karta),
+gaze-trace ur vinklar+positioner som redan finns i replay-datan. Prototypbar offline direkt.
+- [ ] Spot-karta v0: klustra dödspositioner + långsamma-håll-positioner per karta ur arkivet.
+- [ ] Scan-mått v0: per rum-övertag/pre-engagemang: checkade spots (blick inom ~5° X ms) vs
+      bemannade → träffkvot per spelare, läs fördelningen av populationen.
+- Ägarens precisering: R18 höll 4 vägar CYKLISKT (titta1→2→3→4→repeat) → rotationen syns i
+  vinkeltidsserien UTAN spot-karta (klustra yaw vid stillastående, hitta cykel: antal vinklar,
+  period, ordningsstabilitet, dwell). Fingeravtryck = ordning+rytm. Extra tell: cykel-BROTT
+  korrelerat med osedd fiendes ankomst på just den vägen (rotationen "vet" när den ska sluta).
+- [ ] Rotation v0 (före spot-kartan, billigast): yaw-kluster + cykeldetektor vid stationära håll.
+- **Slutform: BETEENDEPROFIL per spelare** (ägarens syntes): (1) fusk-rating = utdelning MOT
+  informationsköp (rotation, sök-täckning, latens, pre-aim vs kills/öppningar/blindträffar) —
+  "betalar lite + får mycket" = flaggan; (2) baslinje-PERSONALISERING = mät mot spelarens EGEN
+  historik (frodo-logiken: 0.49→0.95 är anomalin oavsett population) — löser "bästa legit ser ut
+  som milda fuskare"-taket; nya konton matchas mot fingeravtrycksbiblioteket (R18-testet).
+  SuspicionEngine får 3:e input: egen-baslinje-avvikelse. VALIDERING FÖRST: kör mot etiketterade
+  (C5/C6/C2/C4) innan den får vikt — varje tidigare aggregat-metrik dog i speltids/
+  skicklighets-confound (raw-excess, z, gaze). Profilen måste bevisa separation.
+- Smacke-preciseringar: (a) loopen täcker OSÄKERHETSMÄNGDEN (vägar okända fiender kan komma från)
+  → legit rotation AVVECKLAS synkat med vetbar info (lagkamrat täcker/callout/egen clear); fejkad
+  rotation tappar rätt väg vid FEL tidpunkt (före vetbar info) = avvecklingsordningen egen tell.
+  (b) "ser bott-aktigt ut men effektivt" → VARNING: naiv regelbundenhets-heuristik flaggar bästa
+  legit först. Mänskligt regelbunden (~1s-takt + naturlig varians) ≠ maskinregelbunden (tick-
+  perfekt) — samma skiljelinje som recoil-golvet 0.06. (c) kalibrering: ~1s dwell/väg (≈ revisit-
+  parkeringens 1s).
+- **Validerat 2026-07-27 (22 lokala demos, per-demo-körning — OBS: batch-körningar dog tyst på
+  miljö-SIGTERM, morgonens "21-demo-resultat" var i själva verket 2+nache; ALLT omkört korrekt):**
+  (a) Rök-gate: 21 matchade demos, 85 spelare — 11% samples bortgatade, baslinje ORÖRD 0.503→0.503,
+  max individskifte ~2pp → gaten är säker, porta till live. (b) Rotation v0 FUNKAR: 158 episoder,
+  skill-stegen bekräftad (A1 11ep/24varv, A2, ArMoKS, R18 10/20 — och fingeravtrycket
+  binder redan R18+R18^ till samma steamId); dwell-population median 1648ms p25 1109
+  (ägarens ~1s-gissning nära); 6 st 4–5-vägars-loopar (A1 5 vägar). Snuskungen har legit
+  4-vägars-rotation på island (informationsköpare — kontext för hans 25/7-burst). (c) Precog-
+  baslinje 6.3% (6307 kanter, 19 spelare ≥150): toppen 8.6% = A6/A8/A2/ArMoKS
+  (skickliga stammisar = v0-confounden, som väntat); medianlat per spelare 102–320ms (median 188)
+  = mänskligt. `--rotations out.csv` ny flagga.
+- **BanCheck 2026-07-27 (nyckeln åter i bruk, private/apikey.txt):** helgens 7 misstänkta
+  (frodo, spöknumret -841923, SmrtAsp, Snuskungen, purrly, Poska, Camz) = 0 VAC/game-bans
+  (brusig negativ, som alltid). Lokala korpusen 99 id:n → 4 bans, alla redan kända/irrelevanta
+  (C6 game-ban d230 = vår etikett, G2 griefer, HAWAII 13år gammal VAC, Ollon d1537).
+- [ ] **Faceit-modulen (OSBase) som andra etikettkälla:** modulen sparar redan skill-level + ban
+  per spelare i osbase-DB:n. (1) Faceit-bans = snabbare/AC-drivna labels än VAC → exportera och
+  joina på steamId i BanCheck-svepet; ban EFTER demo = stark etikett. (2) Faceit-level = extern
+  skicklighetsreferens åt beteendeprofilen (utdelning/informationsköp kalibrerad mot deklarerad
+  nivå; "level 2 som presterar som 10 utan informationsköp" = skärpt flagga). (3) smurf-korsref.
+- **Faceit-cachen joinat (private/faceit_cache.csv, 419 spelare, 177 konton, 23 st 2000+):**
+  purrly=aaseo(NO,lvl4) — ägarens "åse"-minne bekräftat oberoende; SmrtAsp=lvl3/890/US (låg nivå
+  + perfekt burst = "över sin nivå"-mönstret, KVAR som huvudfrågetecken); frodo+Poska+spöknumret
+  = inga faceit-konton (frodo-identitetsmönstret består); TonkeN aktiv faceit-ban SMURFING
+  ("Tornerydaren") → fingeravtryckslagret. Elo-kurvor v0 (SMÅ N, 5-11/bucket): medianlat 188→141ms
+  med elo (enda som skalar som antaget); precog SJUNKER 6.2→4.7% och rotationsvarv/h 8.4→4.4 —
+  elit vaktar-och-scannar INTE, de tar karta + snabbpeekar (ägarens tes syns i datat). LÄRDOM:
+  elo-kurvornas RIKTNING läses ur data per metrik, antas ej. Skärpt flagga = flera kurvor fel
+  samtidigt (elitlatens + låg info-insamling + låg deklarerad elo).
+- [ ] **Tick-driften BEKRÄFTAD mot riktig demo (SmrtAsp-granskningen 27/7):** loggad tick 41608 =
+  död spelare i demon → Server.CurrentTime×64 ≠ demo-tick (warmup/inspelningsstart-offset), precis
+  som Report()-kommentaren varnade. Fix: logga (runda, sek-in-i-rundan) + gärna wallclock-delta mot
+  inspelningsstart i varje signal; granskarens formel tills dess: gototick = (signal-wallclock −
+  klockslag i demofilnamnet) × 64.
+- **SmrtAsp FRIAD (demogranskning 27/7, nache 25/7):** ser fienden runt hörnet 10:30.4, första
+  skott 10:30.8 = 400 ms mänsklig reaktionskedja. Burst-mekanismen: spotted-onset-lagg förstärkt
+  av 117 ping (US-spelare) under hörn-engagemanget. Kombination lvl3 + 0-1 scoreboard + ping
+  stödjer. Demo-offset uppmätt: ~20 s (warmup) — purrly i samma demo ⇒ ~6:24 demo-tid (rök-
+  hypotes, ping 24). Helgens sex: frodo=lagg, Camz=rök+ljud, SmrtAsp=onset+ping. Kvar ogranskade:
+  purrly, Snuskungen (har legit 4-vägars-rotation), Poska (2 bursts, starkast kvarvarande).
+- Faceit-priorn trestegad (ägarens vikting): konto+historik utan ban = friande merit VIKTAD PÅ
+  MATCHANTAL (ägaren själv lvl4/1000 på få matcher + massiv serverhistorik = nivå-1-källan egen
+  historik trumfar); faceit-ban = stark etikett (klient-side AC); INGET konto = svag men additiv
+  signal — nära noll ensam (242/419 saknar konto), men räknas som "en täckningskälla mindre" i
+  profilen (färskt steam + ingen faceit + ingen serverhistorik + hög prestanda = frodo-profilen).
 
-**Tyst-incidenterna granskade (2026-07-29, kontextreplay):** 1 legit med ny lärdom —
-observern **skadade fienden aktivt** under tracken (molotov-burn = ljud/lågor/feedback) →
-[ ] exculperings-gate "pågående damage på målet = infokanal" (PlayerHurt finns). 1 detektor-
-artefakt — **stationär fiende + observerns egen rörelse** genererar bäringssvepet (bäring är
-observer-relativ) → [x] `WallhackMinEnemyMoveUnits` från 0 till uppmätt värde: **100 u
-(v0.9.5)** — `Sweep --minmove 0..200` över 21-demo-korpusen: vid 100 faller legit-sessionerna
-13→10 med VARJE fuskarsignal intakt (0.47/1.23 sign/min oförändrade); 150 äter en äkta signal,
-200 äter alla. 100 är knät. 1 suspect-notering (n=1, detaljer i private).
-Nettoresultat: även de sista 3 "supersignalerna" var 2/3 förklarliga — kvarvarande äkta
-FP-frekvens efter båda fixarna: potentiellt 1 signal på 313 sessioner.
+## ⭐⭐ FÖRSTA LIVE-FÅNGSTEN: C7 ("C7") — självbekänd strafe.one — nulltesten omkalibrerad — v0.9.7 — 2026-08-04
 
-## NATTKARTS-ARTEFAKTEN: nulltest-z är kartberoende → populationsbaseline — 2026-07-30
+**Fallet.** Demo `20260804-184118-de_whistle.dem`: C7 ([steamid], färskt konto,
+0 arkivhistorik) joinar ~r10, knivhugger direkt teammates, teamkillas, och one-tappar sedan
+17 kills (16 HS) på 4,33 alive-min — SAMTLIGA med R8 (hurt-events rapporterar "deagle" —
+motorquirk). Hit% 44 mot fältets ~20. Byter namn VARJE runda — trunkerar sitt nick bokstav för bokstav
+ned till en enda bokstav — så R19:s kick-på-namn blev verkningslöst; namnbyteskarusell = kick-by-name-sabotage
+(lärdom: admin-verktyg ska alltid gå på steamId). **Självbekännelse i chatten: "i use
+strafe.one crack"** + "volvo ac". Dödas i demons sista sekunder av A6. Ingen VAC/game-ban
+än. → **C7 i etikettsetet: första cheatern fångad live av pipelinen, med både demo, livelogg
+och bekännelse.** Mekaniskt REN: silent-aim-mätningen (min över lag-fönstret) < 1° på nästan
+alla kills, ingen snap/spin/antiaim — "legit"-stils aimassist + vägginfo. Informationsaxeln
+är hela målet, precis det den finns för.
 
-Första ackumulerade liveloggen efter geo-deployen (2026-07-25→30, 2 366 signaler) gav tre
-resultat:
+**Live-pipelinen tog honom på ~1 minut** (shadow): första signalen 18:51:43, nulltesten
+eskalerade z=4→9 på 20 SEKUNDER, toppade z=12; totalt 9 track + 10 nulltest-signaler.
+Simulerad fusion: peak 6,38 = långt över Review 2,5. Inga alerts var väntade — axlarna är
+shadowade (governance).
 
-1. **Geo-gatade wallhack.track fungerar i drift**: alla 204 track-signaler geo-gatade, 27
-   mappar (bake-on-map-load håller), 54 spelare, toppade av kända regulars. Ingen
-   spelare-kartsession når trovärdigt ≥0.2 sign/min-tröskeln (tätast: n=4 på en karta,
-   0.16–0.49/min beroende på närvaro-antagande). Livebrusgolvet matchar offline-experimentets.
-   Sex livedagar med NOLL Tier-1-signaler — de uppmätta noll-baslinjerna håller.
-2. **Nattkartor inflaterar nulltest för ALLA**: median-z per karta ~5 på normala mappar men
-   **10.0 på ena nattkartan (max 22!) och 7.0 på andra**; flera orelaterade regulars på z 19–22
-   i samma session → kartartefakt, inte spelare. Trolig mekanism: spotted sätts opålitligt på
-   mörka community-remakes → fiender man faktiskt SER räknas som "unspotted" → alla "trackar
-   nutiden". Poolad populations-present-rate 0.68 på nattsessionen vs ~0.5 normalt.
-3. **Fixen (v0.9.5) är projektprincipen, inte kartlistor**: när kartans övriga population har
-   ≥200 diskordanta samples krävs även två-proportions-z ≥ 3 av spelarens present-rate ÖVER
-   populationens. Artefakten slår båda sidor lika och kancellerar; gaten kan bara tysta, aldrig
-   lägga till; tunn population = absoluta testet ensamt (gamla beteendet). Evidensen är
-   per-karta (reset vid mapbyte). Offline-replay mot nattsessionen: baselinen tystar den;
-   kvarvarande residual = småsampel-outliers (aggressiva spelare tittar på synliga fiender
-   oftare — heterogenitet, inte suspects). Nattkartor förblir lägre förtroende för
-   informations-axlar tills spotted-beteendet verifierats där (css_osac_los på en nattkarta).
+**Men 5 dagars populationsdata (31/7→4/8, post-v0.9.5) mot honom avslöjade TVÅ
+kalibreringsfel i nulltesten:**
+1. **Autokorrelation vid små n.** 20 Hz-pollarna är inte oberoende — en engagement ger en
+   obruten svit present-only-samples. Legit regulars når 97–100 % present-rate på 30-samples-
+   fönster och z≈9 inom 20 s. McNemars oberoende-antagande gäller inte där → z vid små n är
+   brus, `minObservations=30` var meningslöst lågt.
+2. **Present-bias är universellt POSITIV hos skickliga spelare** (ljud + game sense siktar dig
+   dit osedda fiender ÄR). På stora-n-excess mot kartpopulationen rankade C7 bara 4–6:e —
+   R18^ +36, A7 +31, A1 +29, C7 +28/+25, R20 +26. Axeln kan ALDRIG döma ensam.
+
+**Fixen (v0.9.7), vald genom motorsimulering över hela 5-dagarsloggen (inte gissning):**
+`NullTestMinObservations` 30→400 (C7 passerade 400 discordant på ~4 min — låg latenskostnad)
++ ny `NullTestWeight`=0,5 (korroborationsroll). Resultat i simuleringen: Review-sessioner
+**97 → 1** (96 kända-legit eliminerade; kvar = C7 på 3,09, närmaste legit 2,4× lägre).
+Ärlig brasklapp: positivklassen är n=1 och knopparna valdes på detta fönster — det som BÄR
+ändringen är negativsidan (96 falska Review borta över dussintals regulars). Track separerade
+oberoende på båda vägarna: 2,1 sig/min (C7) mot fältmax ~0,1/min i hela sessioner. Axlarna
+förblir shadowade — v0.9.7 gör nulltesten VÄRDIG att graduera, den graduerar den inte.
+
+- [ ] Nästa: håll utkik efter sa_bans-raden för [steamid] (bekräftelse-etikett);
+      kör C7-demon genom Sweep-armarna (geo/geo+team-unspotted) som ny positiv.
+- [ ] Live/offline-diskrepansen: offline-nulltesten (alla samples, unseenNow−unseenPast)
+      separerade C7 bättre (excess +1,60 % mot fältets ≤0,59 %) än live-variantens
+      aim-gatade discordant-delmängd — förstå varför innan nästa gradering.

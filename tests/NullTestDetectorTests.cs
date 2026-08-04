@@ -24,6 +24,16 @@ public class NullTestDetectorTests
     }
 
     [Fact]
+    public void Fusion_weight_is_the_configured_one()
+    {
+        // The axis corroborates rather than convicts (universal present-bias in skilled players),
+        // so the plugin passes a configurable sub-1.0 weight into fusion. Verify the plumbing.
+        var d = new NullTestDetector(minObservations: 30, minZ: 3f, weight: 0.5f);
+
+        Assert.Equal(0.5f, d.Weight);
+    }
+
+    [Fact]
     public void Ignores_a_symmetric_player_however_long_they_play()
     {
         // Present and past hit equally often — game sense, not a wallhack. z stays ≈ 0 forever.

@@ -98,6 +98,7 @@ public sealed class OSAntiCheatPlugin : BasePlugin, IPluginConfig<OSAntiCheatCon
             config.WallhackGazeRoundStartMultiplier);
         _nullTest = new NullTestDetector(
             config.NullTestMinObservations, config.NullTestMinZ,
+            weight: config.NullTestWeight,
             minPopObservations: config.NullTestMinPopObservations);
     }
 

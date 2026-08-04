@@ -321,10 +321,28 @@ public sealed class OSAntiCheatConfig : BasePluginConfig
     [JsonPropertyName("NullTestAimDeg")]
     public float NullTestAimDeg { get; set; } = 5f;
 
-    /// <summary>Discordant McNemar observations (present-hit-not-past PLUS past-hit-not-present)
-    /// required before the z-score is trusted enough to emit. Guards against low-evidence noise.</summary>
+    /// <summary>
+    /// Discordant McNemar observations (present-hit-not-past PLUS past-hit-not-present) required
+    /// before the z-score is trusted enough to emit. The 20 Hz polls are heavily autocorrelated —
+    /// one engagement yields a run of all-present-only samples, so z is meaningless at small
+    /// counts: 5 days of live shadow data (2026-07-31→08-04) showed legit regulars hitting 97–100%
+    /// present-rate on 30-sample bursts (z≈9 inside 20 seconds). At 400 the burst noise has washed
+    /// out; the one confirmed cheater in that window reached 400+ discordant samples within ~4
+    /// minutes of joining, so the evidence gate costs little detection latency.
+    /// </summary>
     [JsonPropertyName("NullTestMinObservations")]
-    public int NullTestMinObservations { get; set; } = 30;
+    public int NullTestMinObservations { get; set; } = 400;
+
+    /// <summary>
+    /// Fusion weight for the null test — deliberately below 1.0 because the axis corroborates
+    /// rather than convicts: skilled players genuinely aim where unseen enemies ARE (sound,
+    /// game sense), so a universal positive present-bias exists in the honest population. On the
+    /// 5-day live window, weight 0.5 with MinObservations 400 put exactly one session at Review —
+    /// the confirmed strafe.one cheater (simulated peak 3.09) — and zero of the 96 legit sessions
+    /// the previous defaults would have flagged.
+    /// </summary>
+    [JsonPropertyName("NullTestWeight")]
+    public float NullTestWeight { get; set; } = 0.5f;
 
     /// <summary>
     /// McNemar z-score at/above which the null test emits. z is a standardised statistic, so this

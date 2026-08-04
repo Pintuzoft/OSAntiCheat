@@ -37,6 +37,18 @@ namespace OSAntiCheat.Detection.Detectors;
 /// rates); when the rest of the population is too thin to be a baseline, behaviour falls back to
 /// the absolute test alone. The relative gate can only ever SUPPRESS emissions, never add them.
 /// Evidence is per-map: the plugin resets this detector on map change.
+///
+/// v0.9.7 recalibrates against the first labelled positive caught live (2026-08-04, a
+/// self-admitted strafe.one user) plus 5 days of population shadow data. Two findings:
+///   • The 20 Hz polls are AUTOCORRELATED — one engagement produces an unbroken run of
+///     present-only samples, so the McNemar independence assumption fails at small n: legit
+///     regulars hit 97–100% present-rate on 30-sample windows and z≈9 within 20 seconds.
+///     Hence minObservations 30 → 400 (the cheater still passed 400 within ~4 minutes).
+///   • Even at large n the present-bias is universally POSITIVE for skilled players (sound and
+///     game sense aim you where unseen enemies are); on large-n excess the confirmed cheater
+///     ranked only 4th–6th behind known regulars. The axis therefore corroborates, never
+///     convicts: fusion weight 0.5. Replaying the engine over the 5-day log with these values
+///     yields exactly one Review session — the cheater — versus 97 (96 false) before.
 /// </summary>
 public sealed class NullTestDetector : IDetector
 {
