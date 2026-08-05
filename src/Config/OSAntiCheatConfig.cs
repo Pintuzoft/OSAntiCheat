@@ -14,7 +14,7 @@ public sealed class OSAntiCheatConfig : BasePluginConfig
     // a version bump — missing keys simply deserialize to the defaults below (so new detectors are
     // active even under a stale file). To get the file itself current: unload the plugin, move the
     // json away, load again — it regenerates at this version with every key present.
-    public override int Version { get; set; } = 18;
+    public override int Version { get; set; } = 19;
 
     /// <summary>
     /// Include bots as detection subjects. Bots have perfect server-driven aim so they trip the
@@ -91,14 +91,16 @@ public sealed class OSAntiCheatConfig : BasePluginConfig
     public bool AutoActionEnabled { get; set; } = true;
 
     /// <summary>
-    /// Which deterministic edges may trigger the auto-action. Available: "spin-hs-kill" (headshot
-    /// landed while >360° of continuous rotation is still whirling at the kill tick, repeated),
-    /// "fake-pitch" (view pitch past the engine's server-side ±89° clamp for consecutive ticks).
-    /// The poll-based continuous-spin and yaw-jitter signals carry no edge by design — strong, but
-    /// they stay log+fusion-only until they earn the same validation.
+    /// Which edges may trigger the auto-action. Available: "spin-hs-kill" (headshot landed while
+    /// >360° of continuous rotation is still whirling at the kill tick, repeated), "fake-pitch"
+    /// (view pitch past the engine's server-side ±89° clamp for consecutive ticks), "name-churn"
+    /// (repeated in-game renames — nick-changer; the one non-physics edge, gated at measured-zero:
+    /// no honest player held two names within a session across 910 logged sessions, remove it here
+    /// if your population jokes with renames). The poll-based continuous-spin and yaw-jitter
+    /// signals carry no edge by design — strong, but log+fusion-only until they earn the same bar.
     /// </summary>
     [JsonPropertyName("AutoActionEdges")]
-    public string[] AutoActionEdges { get; set; } = { "spin-hs-kill", "fake-pitch" };
+    public string[] AutoActionEdges { get; set; } = { "spin-hs-kill", "fake-pitch", "name-churn" };
 
     /// <summary>
     /// Command run on a confirmed edge. Placeholders: {slot} {userid} {steamid} {name} {detector}
@@ -112,10 +114,12 @@ public sealed class OSAntiCheatConfig : BasePluginConfig
         "kickid {userid} [OSAC] CHEAT DETECTED: {detector} - kicked by anticheat";
 
     /// <summary>Optional public chat announce when the action runs. Same placeholders as
-    /// <see cref="AutoActionCommand"/>. Empty = silent.</summary>
+    /// <see cref="AutoActionCommand"/>. Empty = silent. Kept detector-neutral: "input impossible
+    /// for a human" was accurate for the physics edges but not for name-churn — the message must
+    /// never overclaim, or the first arguable kick costs the system its credibility.</summary>
     [JsonPropertyName("AutoActionAnnounce")]
     public string AutoActionAnnounce { get; set; } =
-        "[OSAC] CHEAT DETECTED — {name} was kicked ({detector}: input impossible for a human)";
+        "[OSAC] CHEAT DETECTED — {name} was kicked ({detector})";
 
     /// <summary>
     /// Bone-lock aimbot: repeated head-CENTRE locks tighter than a human hand. A LOGIC-BREACH axis
@@ -226,6 +230,26 @@ public sealed class OSAntiCheatConfig : BasePluginConfig
     /// <summary>Sustained yaw rate (deg/s) above which a spin is suspected. Lower to trigger on fast turns.</summary>
     [JsonPropertyName("SpinbotMinRateDegPerSec")]
     public float SpinbotMinRateDegPerSec { get; set; } = 1000f;
+
+    /// <summary>
+    /// Nick-changer detection: repeated in-game renames within a rolling window. Demo-measured on
+    /// the captured cheater (2026-08-04): an animated marquee nick, 614 changes in ~8.5 min
+    /// (~1.3/s); every other player in the demo had zero. Honest mid-match renames happen — but as
+    /// isolated events, so the gate is RATE-based: 3 inside 20 s is ~2 s of marquee and
+    /// unreachable by hand.
+    /// </summary>
+    [JsonPropertyName("EnableNameChange")]
+    public bool EnableNameChange { get; set; } = true;
+
+    /// <summary>Name changes within the window before the name-churn edge fires.</summary>
+    [JsonPropertyName("NameChangeMinChanges")]
+    public int NameChangeMinChanges { get; set; } = 3;
+
+    /// <summary>Rolling window (seconds) the rename count is evaluated over. 20 s + 3 changes =
+    /// a rate no manual renamer reaches (three deliberate Steam renames take far longer), while
+    /// the measured cheat marquee crosses it within ~2 s.</summary>
+    [JsonPropertyName("NameChangeWindowSeconds")]
+    public float NameChangeWindowSeconds { get; set; } = 20f;
 
     /// <summary>Headshot kills landed mid-spin before the spin-hs-kill edge fires. The first is always
     /// silent at 2 (a lucky HS mid-trickshot-360 is a fluke, not a bot); a spinbot re-qualifies every

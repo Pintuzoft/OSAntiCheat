@@ -50,6 +50,7 @@ public sealed class OSAntiCheatPlugin : BasePlugin, IPluginConfig<OSAntiCheatCon
     private SilentAimDetector _silent = new();
     private AntiAimDetector _antiAim = new();
     private SnapDetector _snap = new();
+    private NameChangeDetector _nameChange = new();
     private WallhackDetector _wallhack = new();
     private WallhackGazeDetector _wallhackGaze = new();
     private NullTestDetector _nullTest = new();
@@ -90,6 +91,7 @@ public sealed class OSAntiCheatPlugin : BasePlugin, IPluginConfig<OSAntiCheatCon
         _silent = new SilentAimDetector(config.SilentAimOffDeg, config.SilentAimMinHits);
         _antiAim = new AntiAimDetector(config.AntiAimPitchDeg, config.AntiAimJitterDeg, config.AntiAimJitterFlips);
         _snap = new SnapDetector(config.SnapExactDeg, config.SnapOffFloorDeg, config.SnapMinSnaps);
+        _nameChange = new NameChangeDetector(config.NameChangeMinChanges, config.NameChangeWindowSeconds);
         _wallhack = new WallhackDetector(
             config.WallhackMinTrackSeconds, config.WallhackMinEnemyMoveUnits,
             config.WallhackMinBearingChangeDeg, config.WallhackFollowFraction,
@@ -118,7 +120,7 @@ public sealed class OSAntiCheatPlugin : BasePlugin, IPluginConfig<OSAntiCheatCon
         // Map each detector to its response class so an alert can be labelled by the highest tier
         // that contributed (a LogicBreach signal makes the whole alert "beyond human").
         foreach (IDetector d in new IDetector[]
-                 { _aimbot, _triggerbot, _spinbot, _boneLock, _recoil, _silent, _antiAim, _snap, _wallhack, _wallhackGaze, _nullTest })
+                 { _aimbot, _triggerbot, _spinbot, _boneLock, _recoil, _silent, _antiAim, _snap, _nameChange, _wallhack, _wallhackGaze, _nullTest })
             _detectorKinds[d.Id] = d.Kind;
 
         Logger.LogInformation(
@@ -144,6 +146,17 @@ public sealed class OSAntiCheatPlugin : BasePlugin, IPluginConfig<OSAntiCheatCon
 
         // Wallhack tracking needs finer resolution to follow a moving enemy through geometry.
         AddTimer(0.05f, PollWallhack, TimerFlags.REPEAT);
+
+        // Nick-changer: renaming every round defeats kick-by-name (live capture 2026-08-04) —
+        // repeated renames inside the window are a population-measured-zero edge.
+        RegisterEventHandler<EventPlayerChangename>((@event, _) =>
+        {
+            var player = @event.Userid;
+            if (!Config.EnableNameChange || player is null || !player.IsValid) return HookResult.Continue;
+            if (player.IsBot && !Config.IncludeBots) return HookResult.Continue;
+            Report(_nameChange, _nameChange.OnNameChange(player.Slot, Server.CurrentTime));
+            return HookResult.Continue;
+        });
 
         // Track round start so the gaze detector can weight the "no legit info yet" window.
         RegisterEventHandler<EventRoundStart>((_, _) =>
@@ -181,6 +194,7 @@ public sealed class OSAntiCheatPlugin : BasePlugin, IPluginConfig<OSAntiCheatCon
                 _silent.Remove(player.Slot);
                 _antiAim.Remove(player.Slot);
                 _snap.Remove(player.Slot);
+                _nameChange.Remove(player.Slot);
                 _wallhack.Remove(player.Slot);
                 _wallhackGaze.Remove(player.Slot);
                 _nullTest.Remove(player.Slot);
@@ -353,6 +367,7 @@ public sealed class OSAntiCheatPlugin : BasePlugin, IPluginConfig<OSAntiCheatCon
         {
             "spinbot" => "SPINBOT",
             "antiaim" => "ANTI-AIM",
+            "namechanger" => "NICK-CHANGER",
             _ => signal.Detector.ToUpperInvariant(),
         };
         string verdict = executed ? "CHEAT KICKED" : "CHEAT CONFIRMED (dry-run, NOT kicked)";

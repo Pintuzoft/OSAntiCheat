@@ -4,6 +4,28 @@ Version history for OSAntiCheat, newest first. Every release gets an entry here;
 describes the current state only. Player/admin names follow the pseudonym scheme from
 [TODO.md](TODO.md) (Cn = typed cheater, Gn = griefer, Rn = regular, An = admin).
 
+## v0.9.91 — nick-changer detection with auto-kick (name-churn edge)
+
+The live-captured cheater (2026-08-04) ran an **animated marquee nick** — demo-measured 614
+renames in ~8.5 minutes (~1.3/s, `m→me→mem→…→memesex` and back) — which also defeats
+kick-by-name. Every other player in the demo: zero renames; the 910 logged map-sessions show
+honest renames only as isolated events.
+
+- New `NameChangeDetector` (`namechanger`, Behavioural, weight 1.0): counts renames in a rolling
+  window; ≥`NameChangeMinChanges` (3) inside `NameChangeWindowSeconds` (20) → signal carrying
+  the new **`name-churn`** edge, in `AutoActionEdges` by default → kick. The rate gate is
+  unreachable by hand (three deliberate Steam renames take far longer than 20 s) and the marquee
+  crosses it in ~2 s. The first non-physics edge — population-measured-zero instead of
+  impossible; remove `"name-churn"` from `AutoActionEdges` for fusion-only.
+- Default `AutoActionAnnounce` no longer says "input impossible for a human" (untrue for this
+  edge — the message must never overclaim): now `[OSAC] CHEAT DETECTED — {name} was kicked
+  ({detector})`. **Server configs regenerated at v18 keep the old wording — update the announce
+  line manually.**
+- Version is 0.9.91 (not 0.9.10) because OSBase compares versions lexically and would treat
+  0.9.10 as a downgrade from 0.9.9.
+
+Config version 19. 93 tests.
+
 ## v0.9.9 — enforcement messaging made unmistakable
 
 Owner feedback on v0.9.8 before it ever fired: the messages must be impossible to misread —

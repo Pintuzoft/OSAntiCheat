@@ -73,6 +73,12 @@ auto-action edge (see [Enforcement](#enforcement)); everything else is log + adm
 | **Anti-recoil** | Recoil compensation too consistent to be human | Human floor ratio ~0.06 across 17k archive sprays |
 | **Anti-aim** | Pitch past the engine's ±89° clamp, or ≥6 consecutive sign-alternating ≥45° yaw jerks | Honest pitch parks at exactly 89.00; honest max alternation: 1 |
 
+One further live axis sits *between* the tiers: **Nick-changer** (v0.9.91) — ≥3 in-game renames
+inside 20 s. Not a mechanical impossibility (classed Behavioural), but population-measured to
+zero: cheat marquee nicks churn ~1.3 renames/s while honest renames are isolated events — no
+3-in-20s cluster in 910 logged sessions plus the capture demo. It is the one behavioural axis
+that carries an auto-action edge (see [Enforcement](#enforcement)).
+
 **Tier 2 — behavioural / information** (improbable, human-reviewed):
 
 | Detector | Signal | Status |
@@ -97,6 +103,12 @@ honest baseline:
 - **`fake-pitch`** — view pitch past the engine's server-side ±89° clamp for 3+ consecutive
   ticks. The honest population parks at exactly 89.00 and cannot exceed it; only input that
   bypassed the normal client path can.
+- **`name-churn`** (v0.9.91) — ≥3 in-game renames inside 20 seconds. The one non-physics edge,
+  population-measured instead: the first live-captured cheater ran an *animated marquee nick*
+  (614 renames in ~8.5 min, ~1.3/s — which also defeats kick-by-name), while every other player
+  in the same demo had zero and honest mid-match renames are isolated events; three deliberate
+  Steam renames cannot be executed in 20 s. Remove it from `AutoActionEdges` if your population
+  jokes with rapid renames.
 
 The default response is **kick + public announce** (`AutoActionCommand` / `AutoActionAnnounce`,
 placeholders `{slot} {userid} {steamid} {name} {detector} {edge}`) — a kick costs a wrong player
