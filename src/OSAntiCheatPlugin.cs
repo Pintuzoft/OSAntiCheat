@@ -306,23 +306,32 @@ public sealed class OSAntiCheatPlugin : BasePlugin, IPluginConfig<OSAntiCheatCon
         // Never act on bots (test subjects under IncludeBots) or a player already gone.
         if (suspect is null || !suspect.IsValid || suspect.IsBot) return;
 
-        string cmd = string.IsNullOrWhiteSpace(Config.AutoActionCommand) ? "" :
-            Config.AutoActionCommand
-                .Replace("{slot}", suspect.Slot.ToString())
-                .Replace("{userid}", suspect.UserId?.ToString() ?? "")
-                .Replace("{steamid}", suspect.SteamID.ToString())
-                .Replace("{name}", suspect.PlayerName ?? "?");
+        string Fill(string template) => template
+            .Replace("{slot}", suspect.Slot.ToString())
+            .Replace("{userid}", suspect.UserId?.ToString() ?? "")
+            .Replace("{steamid}", suspect.SteamID.ToString())
+            .Replace("{name}", suspect.PlayerName ?? "?")
+            .Replace("{detector}", signal.Detector)
+            .Replace("{edge}", edge);
+
+        string cmd = string.IsNullOrWhiteSpace(Config.AutoActionCommand) ? "" : Fill(Config.AutoActionCommand);
 
         bool executed = Config.AutoActionEnabled && cmd.Length > 0;
         _alerts?.LogAction(signal, edge, executed ? cmd : $"DRY-RUN: {cmd}",
             suspect.PlayerName, suspect.SteamID.ToString(), Server.MapName);
+
+        // Admins always get the full, unambiguous picture in chat — who, which cheat, the exact
+        // evidence, and the SteamID they need to escalate to a ban. This bypasses NotifyAdminsInChat
+        // (that flag gates fusion *suspicions*; an action the plugin took on their server is never
+        // something admins should have to discover in a log file).
+        NotifyAdminsOfAction(suspect, signal, executed);
 
         if (executed)
         {
             Logger.LogWarning("[OSAC] AUTO-ACTION [{Edge}] — {Name} ({SteamId}) running '{Cmd}' :: {Reason}",
                 edge, suspect.PlayerName, suspect.SteamID, cmd, signal.Reason);
             if (!string.IsNullOrEmpty(Config.AutoActionAnnounce))
-                Server.PrintToChatAll(Config.AutoActionAnnounce.Replace("{name}", suspect.PlayerName ?? "?"));
+                Server.PrintToChatAll(Fill(Config.AutoActionAnnounce));
             Server.ExecuteCommand(cmd);
         }
         else
@@ -331,6 +340,35 @@ public sealed class OSAntiCheatPlugin : BasePlugin, IPluginConfig<OSAntiCheatCon
                 "({SteamId}) would run '{Cmd}' :: {Reason}",
                 edge, suspect.PlayerName, suspect.SteamID, cmd.Length > 0 ? cmd : "(no command configured)",
                 signal.Reason);
+        }
+    }
+
+    /// <summary>
+    /// Two-line admin chat notice for an auto-action: no jargon in line one (CHEAT KICKED + name +
+    /// cheat type + SteamID, everything needed to permaban), raw detector evidence in line two.
+    /// </summary>
+    private void NotifyAdminsOfAction(CCSPlayerController suspect, Signal signal, bool executed)
+    {
+        string what = signal.Detector switch
+        {
+            "spinbot" => "SPINBOT",
+            "antiaim" => "ANTI-AIM",
+            _ => signal.Detector.ToUpperInvariant(),
+        };
+        string verdict = executed ? "CHEAT KICKED" : "CHEAT CONFIRMED (dry-run, NOT kicked)";
+        string line1 =
+            $" {ChatColors.Red}[OSAC] {verdict}{ChatColors.Default}: " +
+            $"{ChatColors.Green}{suspect.PlayerName ?? "?"}{ChatColors.Default} — {what} " +
+            $"(steamid {suspect.SteamID})";
+        string line2 =
+            $" {ChatColors.Red}[OSAC]{ChatColors.Default} evidence: {signal.Reason}";
+
+        foreach (var admin in Utilities.GetPlayers())
+        {
+            if (!admin.IsValid || admin.IsBot) continue;
+            if (!AdminManager.PlayerHasPermissions(admin, Config.AdminChatFlag)) continue;
+            admin.PrintToChat(line1);
+            admin.PrintToChat(line2);
         }
     }
 

@@ -101,17 +101,21 @@ public sealed class OSAntiCheatConfig : BasePluginConfig
     public string[] AutoActionEdges { get; set; } = { "spin-hs-kill", "fake-pitch" };
 
     /// <summary>
-    /// Command run on a confirmed edge. Placeholders: {slot} {userid} {steamid} {name}. Empty = log
-    /// only. Default kicks; escalate to your ban system (e.g. "css_ban {steamid} 0 cheating") only
-    /// after watching the kick log for a while — a wrong kick costs a reconnect, a wrong ban a player.
+    /// Command run on a confirmed edge. Placeholders: {slot} {userid} {steamid} {name} {detector}
+    /// {edge}. Empty = log only. Default kicks; escalate to your ban system (e.g.
+    /// "css_ban {steamid} 0 cheating") only after watching the kick log for a while — a wrong kick
+    /// costs a reconnect, a wrong ban a player. Keep the message BLUNT: the player and everyone
+    /// watching should understand it was a cheat detection, not some vague technical hiccup.
     /// </summary>
     [JsonPropertyName("AutoActionCommand")]
-    public string AutoActionCommand { get; set; } = "kickid {userid} [OSAC] impossible input signature";
+    public string AutoActionCommand { get; set; } =
+        "kickid {userid} [OSAC] CHEAT DETECTED: {detector} - kicked by anticheat";
 
-    /// <summary>Optional public chat announce when the action runs. {name} substituted. Empty = silent.</summary>
+    /// <summary>Optional public chat announce when the action runs. Same placeholders as
+    /// <see cref="AutoActionCommand"/>. Empty = silent.</summary>
     [JsonPropertyName("AutoActionAnnounce")]
     public string AutoActionAnnounce { get; set; } =
-        "[OSAC] {name} kicked — physically impossible input (spin/anti-aim signature)";
+        "[OSAC] CHEAT DETECTED — {name} was kicked ({detector}: input impossible for a human)";
 
     /// <summary>
     /// Bone-lock aimbot: repeated head-CENTRE locks tighter than a human hand. A LOGIC-BREACH axis

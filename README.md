@@ -99,9 +99,13 @@ honest baseline:
   bypassed the normal client path can.
 
 The default response is **kick + public announce** (`AutoActionCommand` / `AutoActionAnnounce`,
-placeholders `{slot} {userid} {steamid} {name}`) — a kick costs a wrong player a reconnect, a
-wrong ban a player, so escalation to a ban system is a config choice
-(`"css_ban {steamid} 0 cheating"`), not a default. `AutoActionEnabled=false` reverts to dry-run:
+placeholders `{slot} {userid} {steamid} {name} {detector} {edge}`) — a kick costs a wrong player
+a reconnect, a wrong ban a player, so escalation to a ban system is a config choice
+(`"css_ban {steamid} 0 cheating"`), not a default. The default messages are deliberately blunt —
+"CHEAT DETECTED: spinbot", never a vague technical phrase. Online admins additionally always get
+a two-line chat notice (who + cheat type + SteamID to ban, then the raw detector evidence),
+regardless of `NotifyAdminsInChat` — that flag gates fusion *suspicions*, not actions taken.
+`AutoActionEnabled=false` reverts to dry-run:
 the breach is still logged with the exact command it *would* have run. Every action decision —
 executed or dry-run — is written to the JSON-lines log as a `type:"action"` row next to the
 signal that caused it. Bots are never acted on, and no probabilistic axis can reach this path:

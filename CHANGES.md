@@ -4,6 +4,24 @@ Version history for OSAntiCheat, newest first. Every release gets an entry here;
 describes the current state only. Player/admin names follow the pseudonym scheme from
 [TODO.md](TODO.md) (Cn = typed cheater, Gn = griefer, Rn = regular, An = admin).
 
+## v0.9.9 — enforcement messaging made unmistakable
+
+Owner feedback on v0.9.8 before it ever fired: the messages must be impossible to misread —
+especially for admins. Changes, all messaging:
+
+- **Admins always get a two-line chat notice on every auto-action**, regardless of
+  `NotifyAdminsInChat` (that flag gates fusion *suspicions*; an action the plugin took on
+  their server is never something admins should have to discover in a log file). Line 1:
+  `CHEAT KICKED: <name> — SPINBOT (steamid …)` — everything needed to escalate to a permaban.
+  Line 2: the raw detector evidence string. Dry-run actions are labelled
+  `CHEAT CONFIRMED (dry-run, NOT kicked)`.
+- **Blunt defaults for the kick reason and public announce**: `CHEAT DETECTED: {detector}`
+  instead of v0.9.8's vague "impossible input signature".
+- New placeholders `{detector}` and `{edge}` in `AutoActionCommand`/`AutoActionAnnounce`, and
+  the announce now substitutes all placeholders (v0.9.8 only substituted `{name}`).
+
+No detector or threshold changes.
+
 ## v0.9.8 — first enforcement: auto-kick on the two deterministic edges
 
 The plugin acts on its own for the first time — deliberately on the narrowest possible slice.
