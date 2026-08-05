@@ -22,6 +22,36 @@ public sealed class AlertSink
         if (!string.IsNullOrEmpty(dir)) Directory.CreateDirectory(dir);
     }
 
+    /// <summary>
+    /// Append one auto-action decision — executed or dry-run — so every enforcement (and every
+    /// would-have-been enforcement) is auditable next to the signal that caused it.
+    /// </summary>
+    public void LogAction(Signal signal, string edge, string command,
+        string? playerName, string? steamId, string? map = null)
+    {
+        var record = new
+        {
+            type = "action",
+            wallClock = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss"),
+            map,
+            time = signal.Time,
+            tick = signal.Tick,
+            detector = signal.Detector,
+            edge,
+            command,              // prefixed "DRY-RUN: " when nothing was executed
+            slot = signal.PlayerSlot,
+            name = playerName,
+            steamId,
+            reason = signal.Reason,
+        };
+
+        string json = JsonSerializer.Serialize(record);
+        lock (_gate)
+        {
+            File.AppendAllText(_path, json + Environment.NewLine);
+        }
+    }
+
     /// <summary>Append one raw detector signal (below alert level) for calibration analysis.</summary>
     public void LogSignal(Signal signal, string? playerName, string? steamId, string? map = null)
     {

@@ -22,10 +22,11 @@ namespace OSAntiCheat;
 /// view angles, shots, timing). Detectors measure independent axes; the fusion engine
 /// triangulates them into a per-player suspicion score, split into two response tiers:
 /// LOGIC-BREACH (beyond-human: spinbot, bone-lock, anti-recoil — auto-action-eligible) and
-/// REVIEW (improbable: human-judged, never auto). Auto-action is OFF by default (dry-run: a
-/// confirmed spinbot is logged, not banned) and only ever the logic-breach axes can reach it.
-/// Every signal logs tick + map + wall-clock so a reviewer can find the demo and the moment.
-/// See TODO.md for the roadmap. UNTESTED ON A LIVE SERVER as of this release.
+/// REVIEW (improbable: human-judged, never auto). Auto-action (default: kick + announce) fires
+/// ONLY on signals carrying a deterministic edge — spin-hs-kill and fake-pitch, both physically
+/// impossible for a real client and measured-zero on 321k archive kills + the live deployment —
+/// never the probabilistic axes. Every signal logs tick + map + wall-clock so a reviewer can
+/// find the demo and the moment. See TODO.md for the roadmap.
 /// </summary>
 public sealed class OSAntiCheatPlugin : BasePlugin, IPluginConfig<OSAntiCheatConfig>
 {
@@ -82,8 +83,8 @@ public sealed class OSAntiCheatPlugin : BasePlugin, IPluginConfig<OSAntiCheatCon
         _aimbot = new AimbotSweepDetector(
             config.AimbotMinViewRateDegPerSec, config.AimbotMinSweepShots, config.AimbotMinSweepHitRate);
         _triggerbot = new TriggerbotDetector(config.TriggerbotHumanFloorMs, config.TriggerbotMinShots);
-        _spinbot = new SpinbotDetector(config.SpinbotMinRateDegPerSec);
-        // (SpinbotMinRateDegPerSec is the per-tick spin floor; the continuous-turn + spin-HS gates are internal.)
+        _spinbot = new SpinbotDetector(config.SpinbotMinRateDegPerSec, config.SpinbotMinSpinHsKills);
+        // (SpinbotMinRateDegPerSec is the per-tick spin floor; the continuous-turn gate is internal.)
         _boneLock = new BoneLockDetector(config.BoneLockSpikeDeg, config.BoneLockMinSpikes);
         _recoil = new RecoilDetector(config.RecoilMaxRatio, config.RecoilMinSprays);
         _silent = new SilentAimDetector(config.SilentAimOffDeg, config.SilentAimMinHits);
@@ -287,45 +288,49 @@ public sealed class OSAntiCheatPlugin : BasePlugin, IPluginConfig<OSAntiCheatCon
 
         var tracker = _tracking.For(attacker.Slot);
         if (tracker is not null)
-        {
-            var signal = _spinbot.OnKill(tracker, @event.Headshot, Server.CurrentTime);
-            Report(_spinbot, signal);
-            if (signal is { } s) RespondToSpinbot(attacker, s); // confirmed spin+HS logic-breach
-        }
+            Report(_spinbot, _spinbot.OnKill(tracker, @event.Headshot, Server.CurrentTime));
         return HookResult.Continue;
     }
 
     /// <summary>
-    /// Response to a CONFIRMED spinbot (spin+HS logic-breach). Always logs — durably, with what an
-    /// action WOULD have run — and only executes when explicitly armed (<see cref="OSAntiCheatConfig.AutoActionSpinbot"/>).
-    /// Default is dry-run: we never risk banning an innocent unseen; you watch the log first.
+    /// Response to a signal carrying a deterministic logic-breach edge (spin-hs-kill, fake-pitch).
+    /// Runs <see cref="OSAntiCheatConfig.AutoActionCommand"/> when armed (<see cref="OSAntiCheatConfig.AutoActionEnabled"/>);
+    /// otherwise logs what it WOULD have run (dry-run). Either way the action decision is durably
+    /// logged, so the audit trail exists whether or not anything executed.
     /// </summary>
-    private void RespondToSpinbot(CCSPlayerController suspect, Signal signal)
+    private void Enforce(Signal signal, string edge)
     {
-        // Durable record first, always (this IS the product in dry-run mode).
-        _alerts?.LogSignal(signal, suspect.PlayerName, suspect.SteamID.ToString(), Server.MapName);
+        if (Array.IndexOf(Config.AutoActionEdges, edge) < 0) return;
 
-        string cmd = string.IsNullOrWhiteSpace(Config.SpinbotActionCommand) ? "" :
-            Config.SpinbotActionCommand
+        var suspect = Utilities.GetPlayerFromSlot(signal.PlayerSlot);
+        // Never act on bots (test subjects under IncludeBots) or a player already gone.
+        if (suspect is null || !suspect.IsValid || suspect.IsBot) return;
+
+        string cmd = string.IsNullOrWhiteSpace(Config.AutoActionCommand) ? "" :
+            Config.AutoActionCommand
                 .Replace("{slot}", suspect.Slot.ToString())
                 .Replace("{userid}", suspect.UserId?.ToString() ?? "")
                 .Replace("{steamid}", suspect.SteamID.ToString())
                 .Replace("{name}", suspect.PlayerName ?? "?");
 
-        if (Config.AutoActionSpinbot && cmd.Length > 0)
+        bool executed = Config.AutoActionEnabled && cmd.Length > 0;
+        _alerts?.LogAction(signal, edge, executed ? cmd : $"DRY-RUN: {cmd}",
+            suspect.PlayerName, suspect.SteamID.ToString(), Server.MapName);
+
+        if (executed)
         {
-            Logger.LogWarning("[OSAC] SPINBOT auto-action — {Name} ({SteamId}) running '{Cmd}' :: {Reason}",
-                suspect.PlayerName, suspect.SteamID, cmd, signal.Reason);
-            if (!string.IsNullOrEmpty(Config.SpinbotAnnounce))
-                Server.PrintToChatAll(Config.SpinbotAnnounce.Replace("{name}", suspect.PlayerName ?? "?"));
+            Logger.LogWarning("[OSAC] AUTO-ACTION [{Edge}] — {Name} ({SteamId}) running '{Cmd}' :: {Reason}",
+                edge, suspect.PlayerName, suspect.SteamID, cmd, signal.Reason);
+            if (!string.IsNullOrEmpty(Config.AutoActionAnnounce))
+                Server.PrintToChatAll(Config.AutoActionAnnounce.Replace("{name}", suspect.PlayerName ?? "?"));
             Server.ExecuteCommand(cmd);
         }
         else
         {
-            // Dry-run (default): log what we WOULD do, act on nothing. Arm only after validating.
-            Logger.LogWarning("[OSAC] SPINBOT confirmed (DRY-RUN, no action taken) — {Name} ({SteamId}) " +
-                "would run '{Cmd}' :: {Reason}",
-                suspect.PlayerName, suspect.SteamID, cmd.Length > 0 ? cmd : "(no command configured)", signal.Reason);
+            Logger.LogWarning("[OSAC] AUTO-ACTION [{Edge}] confirmed (DRY-RUN, no action taken) — {Name} " +
+                "({SteamId}) would run '{Cmd}' :: {Reason}",
+                edge, suspect.PlayerName, suspect.SteamID, cmd.Length > 0 ? cmd : "(no command configured)",
+                signal.Reason);
         }
     }
 
@@ -505,8 +510,12 @@ public sealed class OSAntiCheatPlugin : BasePlugin, IPluginConfig<OSAntiCheatCon
             _alerts?.LogSignal(s, p?.PlayerName, p?.SteamID.ToString(), Server.MapName);
         }
 
-        if (shadow) return;              // observe-only: never fuse or alert
+        if (shadow) return;              // observe-only: never fuse, alert, or act
         _engine.Report(s, detector.Weight);
+
+        // Deterministic edges (spin-hs-kill, fake-pitch) are the only signals that can trigger the
+        // auto-action; everything else fuses toward human review and nothing more.
+        if (s.Edge is { } edge) Enforce(s, edge);
     }
 
     /// <summary>

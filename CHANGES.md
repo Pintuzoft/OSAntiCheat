@@ -4,6 +4,31 @@ Version history for OSAntiCheat, newest first. Every release gets an entry here;
 describes the current state only. Player/admin names follow the pseudonym scheme from
 [TODO.md](TODO.md) (Cn = typed cheater, Gn = griefer, Rn = regular, An = admin).
 
+## v0.9.8 — first enforcement: auto-kick on the two deterministic edges
+
+The plugin acts on its own for the first time — deliberately on the narrowest possible slice.
+Signals can now carry a deterministic **edge** marker, set only where the signature is
+physically impossible for a real client *and* measured-zero on the archive:
+
+- **`spin-hs-kill`** (SpinbotDetector.OnKill): headshot kill mid-spin — >360° continuous
+  rotation still whirling ≥1200°/s at the kill tick — repeated (`SpinbotMinSpinHsKills`,
+  new knob, default 2: the first is a fluke-guard, so a spinbot buys exactly two kills).
+- **`fake-pitch`** (AntiAimDetector): pitch past the engine's server-side ±89° clamp for 3+
+  consecutive ticks. Fires without needing any kill at all.
+
+A signal with an edge in `AutoActionEdges` runs `AutoActionCommand` (default
+`kickid {userid} …`) and `AutoActionAnnounce` in public chat. **Armed by default**
+(`AutoActionEnabled=true`) — the validation the old dry-run flag was waiting for has happened:
+0 events across 321k archive kills and the whole live deployment window. The response is a
+kick, not a ban: a bug costs a reconnect, escalation to `css_ban` is a config choice. Every
+action decision, executed or dry-run, is durably logged as a `type:"action"` JSON row.
+
+Replaces the never-armed v0.2-era `AutoActionSpinbot`/`SpinbotActionCommand` path, which
+covered only the spin edge and double-logged its signal. Poll-based continuous-spin and yaw
+jitter intentionally carry no edge (fusion/corroboration only), bots are never acted on, and
+shadowed detectors cannot reach the action path. Config version 17 → 18; 90 tests pass
+(edge markings are regression-locked).
+
 ## v0.9.7 — null test recalibrated against the first live-caught labelled cheater
 
 The live pipeline caught its first in-the-act positive (2026-08-04): **C7**, a self-admitted

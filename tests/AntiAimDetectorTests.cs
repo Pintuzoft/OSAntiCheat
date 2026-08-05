@@ -43,6 +43,7 @@ public class AntiAimDetectorTests
         Assert.NotNull(s);
         Assert.Equal("antiaim", s!.Value.Detector);
         Assert.Contains("pitch", s.Value.Reason);
+        Assert.Equal("fake-pitch", s.Value.Edge); // past-the-clamp is an auto-action edge
     }
 
     [Fact]
@@ -65,6 +66,7 @@ public class AntiAimDetectorTests
         var s = d.OnPoll(tr, t);
         Assert.NotNull(s);
         Assert.Contains("jitter", s!.Value.Reason);
+        Assert.Null(s.Value.Edge); // jitter fuses but is NOT an auto-action edge (corroboration only)
     }
 
     [Fact]

@@ -14,7 +14,7 @@ public sealed class OSAntiCheatConfig : BasePluginConfig
     // a version bump — missing keys simply deserialize to the defaults below (so new detectors are
     // active even under a stale file). To get the file itself current: unload the plugin, move the
     // json away, load again — it regenerates at this version with every key present.
-    public override int Version { get; set; } = 17;
+    public override int Version { get; set; } = 18;
 
     /// <summary>
     /// Include bots as detection subjects. Bots have perfect server-driven aim so they trip the
@@ -79,24 +79,39 @@ public sealed class OSAntiCheatConfig : BasePluginConfig
     };
 
     /// <summary>
-    /// Whether to actually EXECUTE the action on a confirmed spinbot. Default false = DRY-RUN: a
-    /// confirmed spin+HS logic-breach is always LOGGED (including what it *would* have run), but nothing
-    /// is executed. Watch the log; once you've confirmed it only ever fires on real spinbots, set true
-    /// to arm it. This is the one irreversible action — we never risk banning an innocent unseen. Only
-    /// ever triggers on the beyond-human spin+HS signal, never the probabilistic axes. Loud response is
-    /// fine here — a spinbot hides nothing, so an announce leaks no game-state.
+    /// Whether to EXECUTE <see cref="AutoActionCommand"/> when a signal carrying an auto-action edge
+    /// fires. False = DRY-RUN: the confirmed breach is still logged durably (including what it *would*
+    /// have run). Default true as of v0.9.8: the two default edges are physically impossible for a
+    /// real client AND measured-zero across 321k archive kills + the live deployment window, and the
+    /// action is a kick — cheap to undo if a bug ever surfaces, unlike a ban. Only signals carrying an
+    /// edge in <see cref="AutoActionEdges"/> can ever trigger this; the probabilistic axes cannot.
+    /// Loud response is fine here — a spinbot hides nothing, so an announce leaks no game-state.
     /// </summary>
-    [JsonPropertyName("AutoActionSpinbot")]
-    public bool AutoActionSpinbot { get; set; } = false;
+    [JsonPropertyName("AutoActionEnabled")]
+    public bool AutoActionEnabled { get; set; } = true;
 
     /// <summary>
-    /// Command run on a confirmed spinbot. Placeholders: {slot} {userid} {steamid} {name}. Empty = log
-    /// only (no action). Wire it to your ban system, e.g. "css_ban {steamid} 0 spinbot" or "kickid {userid}".
+    /// Which deterministic edges may trigger the auto-action. Available: "spin-hs-kill" (headshot
+    /// landed while >360° of continuous rotation is still whirling at the kill tick, repeated),
+    /// "fake-pitch" (view pitch past the engine's server-side ±89° clamp for consecutive ticks).
+    /// The poll-based continuous-spin and yaw-jitter signals carry no edge by design — strong, but
+    /// they stay log+fusion-only until they earn the same validation.
     /// </summary>
-    public string SpinbotActionCommand { get; set; } = "";
+    [JsonPropertyName("AutoActionEdges")]
+    public string[] AutoActionEdges { get; set; } = { "spin-hs-kill", "fake-pitch" };
 
-    /// <summary>Optional public chat announce on a confirmed spinbot. {name} substituted. Empty = silent.</summary>
-    public string SpinbotAnnounce { get; set; } = "";
+    /// <summary>
+    /// Command run on a confirmed edge. Placeholders: {slot} {userid} {steamid} {name}. Empty = log
+    /// only. Default kicks; escalate to your ban system (e.g. "css_ban {steamid} 0 cheating") only
+    /// after watching the kick log for a while — a wrong kick costs a reconnect, a wrong ban a player.
+    /// </summary>
+    [JsonPropertyName("AutoActionCommand")]
+    public string AutoActionCommand { get; set; } = "kickid {userid} [OSAC] impossible input signature";
+
+    /// <summary>Optional public chat announce when the action runs. {name} substituted. Empty = silent.</summary>
+    [JsonPropertyName("AutoActionAnnounce")]
+    public string AutoActionAnnounce { get; set; } =
+        "[OSAC] {name} kicked — physically impossible input (spin/anti-aim signature)";
 
     /// <summary>
     /// Bone-lock aimbot: repeated head-CENTRE locks tighter than a human hand. A LOGIC-BREACH axis
@@ -207,6 +222,13 @@ public sealed class OSAntiCheatConfig : BasePluginConfig
     /// <summary>Sustained yaw rate (deg/s) above which a spin is suspected. Lower to trigger on fast turns.</summary>
     [JsonPropertyName("SpinbotMinRateDegPerSec")]
     public float SpinbotMinRateDegPerSec { get; set; } = 1000f;
+
+    /// <summary>Headshot kills landed mid-spin before the spin-hs-kill edge fires. The first is always
+    /// silent at 2 (a lucky HS mid-trickshot-360 is a fluke, not a bot); a spinbot re-qualifies every
+    /// engagement, so 2 costs it exactly two kills. Raise for more margin, lower to 1 only if you
+    /// accept that a genuine spinning trickshot headshot (rare but real) triggers the action.</summary>
+    [JsonPropertyName("SpinbotMinSpinHsKills")]
+    public int SpinbotMinSpinHsKills { get; set; } = 2;
 
     /// <summary>
     /// View speed (deg/s) at the shot above which the aim counts as still travelling rather than

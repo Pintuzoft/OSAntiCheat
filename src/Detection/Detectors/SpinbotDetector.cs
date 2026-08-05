@@ -80,7 +80,8 @@ public sealed class SpinbotDetector : IDetector
         float confidence = Math.Clamp(0.85f + 0.05f * (n - _minSpinHsKills), 0.85f, 1f);
         return new Signal(
             Id, shooter.Slot, now, confidence,
-            $"{n} headshot kills mid-spin (>{FullTurn:F0}° continuous rotation, still spinning at the kill) — beyond human");
+            $"{n} headshot kills mid-spin (>{FullTurn:F0}° continuous rotation, still spinning at the kill) — beyond human",
+            Edge: "spin-hs-kill"); // the kill-anchored conjunction is the auto-action edge (0/321k archive kills)
     }
 
     /// <summary>

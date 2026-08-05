@@ -97,7 +97,9 @@ public sealed class AntiAimDetector : IDetector
             {
                 st.LastSignal = now;
                 signal = new Signal(Id, tracker.Slot, now, 0.95f,
-                    $"pitch {s.Angles.Pitch:F1}° past the ±{_pitchDeg:F1}° engine clamp for {st.PitchRun} ticks — not a real client");
+                    $"pitch {s.Angles.Pitch:F1}° past the ±{_pitchDeg:F1}° engine clamp for {st.PitchRun} ticks — not a real client",
+                    Edge: "fake-pitch"); // CS2 clamps server-side at 89.00 — past the clamp is auto-action material
+                                         // (yaw jitter stays edge-less: strong, but corroboration only for now)
             }
 
             // Yaw jitter: large delta with alternating sign, sustained.

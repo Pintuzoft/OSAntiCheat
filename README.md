@@ -39,10 +39,14 @@ Three rules shaped everything that works here, all learned the hard way:
    archive: no human ever went ≥5° off a head to exactly on it in one tick (0 in 318k kills); no
    registered first-of-burst bullet hit ever had the shooter's view ≥10° off the victim (0 in
    3,486); no one ever reversed a ≥45° aim direction more than once consecutively.
-3. **No single signal condemns.** Everything feeds a **fusion engine** (graded confidence,
-   exponential decay, corroboration bonus across *independent* axes, `Watch`/`Review` tiers).
-   Unvalidated axes run in **shadow mode**: they log everything for calibration but cannot fuse
-   or alert. A detection is a *suspect for human review*, never a verdict.
+3. **No single signal condemns — with one carefully-earned exception.** Everything feeds a
+   **fusion engine** (graded confidence, exponential decay, corroboration bonus across
+   *independent* axes, `Watch`/`Review` tiers). Unvalidated axes run in **shadow mode**: they
+   log everything for calibration but cannot fuse or alert. A detection is a *suspect for human
+   review*, never a verdict. The exception (v0.9.8): two signatures that are **physically
+   impossible** for a real client *and* measured-zero across the whole archive carry a
+   deterministic *edge* and may trigger an automatic response (default: kick) — see
+   [Enforcement](#enforcement) below.
 
 The axes split into two families — **mechanics** (the hand does something impossible) and
 **information** (the player knows something they cannot know). Small samples still convict when
@@ -52,10 +56,11 @@ taking binomial tails.
 
 ## Detectors
 
-**Live as of [v0.9.5](https://github.com/Pintuzoft/OSAntiCheat/releases):** all six Tier-1 axes
-below run on the server (log-only); the Tier-2 axes run in shadow. Every Tier-1 gate is placed
+**Live as of [v0.9.8](https://github.com/Pintuzoft/OSAntiCheat/releases):** all six Tier-1 axes
+below run on the server; the Tier-2 axes run in shadow. Every Tier-1 gate is placed
 where the measured honest population has **zero** events — so any signal is, by construction,
-something the population has never produced.
+something the population has never produced. Two Tier-1 signatures additionally carry an
+auto-action edge (see [Enforcement](#enforcement)); everything else is log + admin notice.
 
 **Tier 1 — logic breach** (mechanical impossibility, measured true-zero honest baselines):
 
@@ -78,6 +83,31 @@ something the population has never produced.
 
 Shadow mode is deliberate: a muted detector gathers no data, a shadowed one gathers everything
 without polluting the score — ammunition for a future model over the whole feature vector.
+
+## Enforcement
+
+As of v0.9.8 the plugin can act on its own — but only on signals carrying a **deterministic
+edge**, a signature that is physically impossible for a real client *and* has a measured-zero
+honest baseline:
+
+- **`spin-hs-kill`** — a headshot kill lands while >360° of *continuous* same-direction rotation
+  is still whirling ≥1200°/s at the kill tick, twice (`SpinbotMinSpinHsKills`). A legit
+  trickshot-360 stops to aim, which breaks the spin before the shot; 0 events in 321k archive
+  kills.
+- **`fake-pitch`** — view pitch past the engine's server-side ±89° clamp for 3+ consecutive
+  ticks. The honest population parks at exactly 89.00 and cannot exceed it; only input that
+  bypassed the normal client path can.
+
+The default response is **kick + public announce** (`AutoActionCommand` / `AutoActionAnnounce`,
+placeholders `{slot} {userid} {steamid} {name}`) — a kick costs a wrong player a reconnect, a
+wrong ban a player, so escalation to a ban system is a config choice
+(`"css_ban {steamid} 0 cheating"`), not a default. `AutoActionEnabled=false` reverts to dry-run:
+the breach is still logged with the exact command it *would* have run. Every action decision —
+executed or dry-run — is written to the JSON-lines log as a `type:"action"` row next to the
+signal that caused it. Bots are never acted on, and no probabilistic axis can reach this path:
+the edge whitelist (`AutoActionEdges`) is checked against a field only the two detectors above
+ever set. The poll-based continuous-spin and yaw-jitter signals deliberately carry **no** edge —
+they fuse toward human review like everything else.
 
 ## History & field results
 

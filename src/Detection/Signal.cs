@@ -13,4 +13,6 @@ public readonly record struct Signal(
     float Time,        // server time (seconds) the signal was raised
     float Confidence,  // 0..1
     string Reason,
-    int Tick = 0);     // server tick — stamped centrally so a reviewer can demo_gototick to the moment
+    int Tick = 0,      // server tick — stamped centrally so a reviewer can demo_gototick to the moment
+    string? Edge = null); // deterministic logic-breach edge id ("spin-hs-kill", "fake-pitch") — only
+                          // signals carrying one are ever eligible for auto-action; statistical axes stay null

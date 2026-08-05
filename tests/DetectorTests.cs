@@ -38,6 +38,7 @@ public class DetectorTests
         var signal = new SpinbotDetector().Inspect(t);
         Assert.NotNull(signal);
         Assert.Equal("spinbot", signal!.Value.Detector);
+        Assert.Null(signal.Value.Edge); // poll-spin fuses but is NOT an auto-action edge
         Assert.Equal(DetectorKind.LogicBreach, new SpinbotDetector().Kind);
     }
 
@@ -81,6 +82,7 @@ public class DetectorTests
         var signal = d.OnKill(Spinning(), headshot: true, now: 2f);  // 2nd — beyond human, fires
         Assert.NotNull(signal);
         Assert.Equal("spinbot", signal!.Value.Detector);
+        Assert.Equal("spin-hs-kill", signal.Value.Edge); // the kill-anchored conjunction IS the auto-action edge
     }
 
     [Fact]
