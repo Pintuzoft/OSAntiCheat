@@ -4,6 +4,35 @@ Version history for OSAntiCheat, newest first. Every release gets an entry here;
 describes the current state only. Player/admin names follow the pseudonym scheme from
 [TODO.md](TODO.md) (Cn = typed cheater, Gn = griefer, Rn = regular, An = admin).
 
+## v0.9.92 — blind-headshot-burst detection with auto-kick (blind-hs-burst edge)
+
+C8 (2026-08-07 seabase, video-confirmed wall+aim on a fresh account): an ace of **six scout
+headshots in 12.1 s**, running from spawn zoomed, tracking through walls and smoke — five of six
+victims never once in his spotted mask (`sinceAttSawSec=-1`), sub-degree head error the tick
+*before* each shot. Every hard axis missed it structurally: deadaim wants a PARKED crosshair (he
+moved, 5–45°/s), snap wants a STEP onto the head (he was already sub-degree through the wall),
+track wants LATERAL bearing-following (an intercept course toward the victim has ~none), revisit
+wants a clutch park. The only axis that spoke was the live null test (z=11 seconds after the
+ace). The miss defines the fix — the conjunction that survives is kill-anchored:
+
+- New `KillBurstDetector` (`wallhack.killburst`, LogicBreach, weight 1.6): a HEADSHOT kill on an
+  enemy the killer has **never once seen this map** counts toward a rolling window;
+  ≥`KillBurstMinKills` (4) DISTINCT such victims inside `KillBurstWindowSeconds` (15) → signal
+  carrying the new **`blind-hs-burst`** edge, in `AutoActionEdges` by default → kick. "Never
+  seen" is whole-map spotted-mask memory fed at the 20 Hz wallhack poll (same cadence and
+  semantics as the offline validation); resets on map change and slot vacancy. A sighted victim
+  mid-burst neither counts nor breaks it (C8's fifth kill was sighted; the ace still fires on
+  kill 4, at +4.8 s — before kills 5 and 6 ever happen).
+- **Validation (archive6, 321,423 kills / 6,664 attacker-sessions with any blind HS):** bursts
+  of ≥4 occur exactly TWICE — C5 (spin-silent) and C6 (psilent), both confirmed cheaters — and
+  never for an honest player. The honest tail ends at exactly 3, all pistol-round openings
+  (round 1: sight history still empty for everyone) — hence the floor at 4, do not lower it.
+  C8's ace scores 5.
+- Enforcement is kick-not-ban and the demo records regardless: every signal carries tick + map +
+  wall-clock, so the post-hoc review path (find demo → `demo_gototick` → judge) is unchanged.
+
+Config version 20. 99 tests.
+
 ## v0.9.91 — nick-changer detection with auto-kick (name-churn edge)
 
 The live-captured cheater (2026-08-04) ran an **animated marquee nick** — demo-measured 614

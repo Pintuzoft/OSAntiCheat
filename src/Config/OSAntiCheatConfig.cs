@@ -14,7 +14,7 @@ public sealed class OSAntiCheatConfig : BasePluginConfig
     // a version bump — missing keys simply deserialize to the defaults below (so new detectors are
     // active even under a stale file). To get the file itself current: unload the plugin, move the
     // json away, load again — it regenerates at this version with every key present.
-    public override int Version { get; set; } = 19;
+    public override int Version { get; set; } = 20;
 
     /// <summary>
     /// Include bots as detection subjects. Bots have perfect server-driven aim so they trip the
@@ -96,11 +96,14 @@ public sealed class OSAntiCheatConfig : BasePluginConfig
     /// (view pitch past the engine's server-side ±89° clamp for consecutive ticks), "name-churn"
     /// (repeated in-game renames — nick-changer; the one non-physics edge, gated at measured-zero:
     /// no honest player held two names within a session across 910 logged sessions, remove it here
-    /// if your population jokes with renames). The poll-based continuous-spin and yaw-jitter
+    /// if your population jokes with renames), "blind-hs-burst" (≥ KillBurstMinKills headshot kills
+    /// inside KillBurstWindowSeconds on DISTINCT enemies the killer never once saw this map — the
+    /// wall+aim ace signature; 2 bursts of ≥4 in 321k archive kills, both confirmed cheaters).
+    /// The poll-based continuous-spin and yaw-jitter
     /// signals carry no edge by design — strong, but log+fusion-only until they earn the same bar.
     /// </summary>
     [JsonPropertyName("AutoActionEdges")]
-    public string[] AutoActionEdges { get; set; } = { "spin-hs-kill", "fake-pitch", "name-churn" };
+    public string[] AutoActionEdges { get; set; } = { "spin-hs-kill", "fake-pitch", "name-churn", "blind-hs-burst" };
 
     /// <summary>
     /// Command run on a confirmed edge. Placeholders: {slot} {userid} {steamid} {name} {detector}
@@ -250,6 +253,29 @@ public sealed class OSAntiCheatConfig : BasePluginConfig
     /// the measured cheat marquee crosses it within ~2 s.</summary>
     [JsonPropertyName("NameChangeWindowSeconds")]
     public float NameChangeWindowSeconds { get; set; } = 20f;
+
+    /// <summary>
+    /// Blind headshot burst (wallhack.killburst): repeated headshot kills on DISTINCT enemies the
+    /// killer has never once had in their spotted mask this map, inside a rolling window. The
+    /// wall+aim ace signature (C8, 2026-08-07: six scout HS in 12.1 s running from spawn zoomed —
+    /// missed by every parked/step/lateral-tracking axis because an intercept course produces none
+    /// of those shapes). Validated on 321,423 archive kills: ≥4 occurs exactly twice, both
+    /// confirmed cheaters; the honest tail ends at 3 (pistol-round openings, when the sight
+    /// history is empty for everyone).
+    /// </summary>
+    [JsonPropertyName("EnableKillBurst")]
+    public bool EnableKillBurst { get; set; } = true;
+
+    /// <summary>Distinct never-seen headshot victims inside the window before the blind-hs-burst
+    /// edge fires. Honest archive maximum: 3 (pistol rounds). Do not lower to 3.</summary>
+    [JsonPropertyName("KillBurstMinKills")]
+    public int KillBurstMinKills { get; set; } = 4;
+
+    /// <summary>Rolling window (seconds) the blind-HS burst is evaluated over. The measured C8 ace
+    /// put its 4th distinct blind HS 4.8 s after the first; both archive cheater bursts fit well
+    /// inside 15 s.</summary>
+    [JsonPropertyName("KillBurstWindowSeconds")]
+    public float KillBurstWindowSeconds { get; set; } = 15f;
 
     /// <summary>Headshot kills landed mid-spin before the spin-hs-kill edge fires. The first is always
     /// silent at 2 (a lucky HS mid-trickshot-360 is a fluke, not a bot); a spinbot re-qualifies every

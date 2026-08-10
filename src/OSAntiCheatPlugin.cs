@@ -23,10 +23,10 @@ namespace OSAntiCheat;
 /// triangulates them into a per-player suspicion score, split into two response tiers:
 /// LOGIC-BREACH (beyond-human: spinbot, bone-lock, anti-recoil — auto-action-eligible) and
 /// REVIEW (improbable: human-judged, never auto). Auto-action (default: kick + announce) fires
-/// ONLY on signals carrying a deterministic edge — spin-hs-kill and fake-pitch, both physically
-/// impossible for a real client and measured-zero on 321k archive kills + the live deployment —
-/// never the probabilistic axes. Every signal logs tick + map + wall-clock so a reviewer can
-/// find the demo and the moment. See TODO.md for the roadmap.
+/// ONLY on signals carrying a deterministic edge — spin-hs-kill, fake-pitch, name-churn and
+/// blind-hs-burst, each measured-zero for honest players on 321k archive kills + the live
+/// deployment — never the probabilistic axes. Every signal logs tick + map + wall-clock so a
+/// reviewer can find the demo and the moment. See TODO.md for the roadmap.
 /// </summary>
 public sealed class OSAntiCheatPlugin : BasePlugin, IPluginConfig<OSAntiCheatConfig>
 {
@@ -54,6 +54,7 @@ public sealed class OSAntiCheatPlugin : BasePlugin, IPluginConfig<OSAntiCheatCon
     private WallhackDetector _wallhack = new();
     private WallhackGazeDetector _wallhackGaze = new();
     private NullTestDetector _nullTest = new();
+    private KillBurstDetector _killBurst = new();
 
     private SuspicionEngine _engine = new();
     private AlertSink? _alerts;
@@ -103,6 +104,8 @@ public sealed class OSAntiCheatPlugin : BasePlugin, IPluginConfig<OSAntiCheatCon
             config.NullTestMinObservations, config.NullTestMinZ,
             weight: config.NullTestWeight,
             minPopObservations: config.NullTestMinPopObservations);
+        _killBurst = new KillBurstDetector(
+            config.KillBurstMinKills, config.KillBurstWindowSeconds);
     }
 
     public override void Load(bool hotReload)
@@ -120,7 +123,7 @@ public sealed class OSAntiCheatPlugin : BasePlugin, IPluginConfig<OSAntiCheatCon
         // Map each detector to its response class so an alert can be labelled by the highest tier
         // that contributed (a LogicBreach signal makes the whole alert "beyond human").
         foreach (IDetector d in new IDetector[]
-                 { _aimbot, _triggerbot, _spinbot, _boneLock, _recoil, _silent, _antiAim, _snap, _nameChange, _wallhack, _wallhackGaze, _nullTest })
+                 { _aimbot, _triggerbot, _spinbot, _boneLock, _recoil, _silent, _antiAim, _snap, _nameChange, _wallhack, _wallhackGaze, _nullTest, _killBurst })
             _detectorKinds[d.Id] = d.Kind;
 
         Logger.LogInformation(
@@ -198,6 +201,7 @@ public sealed class OSAntiCheatPlugin : BasePlugin, IPluginConfig<OSAntiCheatCon
                 _wallhack.Remove(player.Slot);
                 _wallhackGaze.Remove(player.Slot);
                 _nullTest.Remove(player.Slot);
+                _killBurst.Remove(player.Slot);
                 _lastFire.Remove(player.Slot);
                 int gone = player.Slot;
                 foreach (var pair in _geoCache.Keys.Where(k => k.Observer == gone || k.Enemy == gone).ToList())
@@ -298,11 +302,33 @@ public sealed class OSAntiCheatPlugin : BasePlugin, IPluginConfig<OSAntiCheatCon
         var attacker = @event.Attacker;
         if (attacker is null || !attacker.IsValid) return HookResult.Continue;
         if (attacker.IsBot && !Config.IncludeBots) return HookResult.Continue;
-        if (!Config.EnableSpinbot) return HookResult.Continue;
 
-        var tracker = _tracking.For(attacker.Slot);
-        if (tracker is not null)
-            Report(_spinbot, _spinbot.OnKill(tracker, @event.Headshot, Server.CurrentTime));
+        if (Config.EnableSpinbot)
+        {
+            var tracker = _tracking.For(attacker.Slot);
+            if (tracker is not null)
+                Report(_spinbot, _spinbot.OnKill(tracker, @event.Headshot, Server.CurrentTime));
+        }
+
+        // Blind-HS burst: enemy bullet headshots only. Same weapon exclusions as the offline
+        // validation (a nade/knife/taser "headshot" carries no aim claim); teamkills are excluded
+        // outright — the spotted mask tracks enemy sight, so a teammate is never "blind".
+        if (Config.EnableKillBurst && @event.Headshot)
+        {
+            var victim = @event.Userid;
+            string weapon = (@event.Weapon ?? "").ToLowerInvariant();
+            bool bullet = weapon.Length > 0 &&
+                !weapon.Contains("grenade") && !weapon.Contains("molotov") &&
+                !weapon.Contains("inferno") && !weapon.Contains("knife") &&
+                !weapon.Contains("bayonet") && !weapon.Contains("taser");
+            if (bullet && victim is not null && victim.IsValid &&
+                victim.Slot != attacker.Slot && victim.Team != attacker.Team)
+            {
+                Report(_killBurst, _killBurst.OnKill(
+                    attacker.Slot, victim.Slot, victim.PlayerName ?? "?",
+                    headshot: true, Server.CurrentTime));
+            }
+        }
         return HookResult.Continue;
     }
 
@@ -368,6 +394,7 @@ public sealed class OSAntiCheatPlugin : BasePlugin, IPluginConfig<OSAntiCheatCon
             "spinbot" => "SPINBOT",
             "antiaim" => "ANTI-AIM",
             "namechanger" => "NICK-CHANGER",
+            "wallhack.killburst" => "WALLHACK (blind headshot burst)",
             _ => signal.Detector.ToUpperInvariant(),
         };
         string verdict = executed ? "CHEAT KICKED" : "CHEAT CONFIRMED (dry-run, NOT kicked)";
@@ -410,6 +437,9 @@ public sealed class OSAntiCheatPlugin : BasePlugin, IPluginConfig<OSAntiCheatCon
         // measures THIS map's spotted-system behaviour, and per-player counts contaminated by a
         // map artifact (night maps) must not follow players to the next map.
         _nullTest.Reset();
+        // Kill-burst sight memory is whole-map by the same token: "never seen" restarts with the
+        // map, exactly like the offline validation (one demo = one map session).
+        _killBurst.Reset();
         if (string.IsNullOrWhiteSpace(Config.BakesDir))
         {
             _bake.Clear();
@@ -423,7 +453,10 @@ public sealed class OSAntiCheatPlugin : BasePlugin, IPluginConfig<OSAntiCheatCon
 
     private void PollWallhack()
     {
-        if (!Config.EnableWallhack && !Config.EnableWallhackGaze && !Config.EnableNullTest) return;
+        // Kill-burst rides this poll too: it only needs the spotted-mask reads the loop already
+        // does, to feed its whole-map "has attacker ever seen victim" memory.
+        if (!Config.EnableWallhack && !Config.EnableWallhackGaze && !Config.EnableNullTest &&
+            !Config.EnableKillBurst) return;
 
         float now = Server.CurrentTime;
         float aimThreshold = Config.WallhackAimThresholdDeg;
@@ -470,7 +503,13 @@ public sealed class OSAntiCheatPlugin : BasePlugin, IPluginConfig<OSAntiCheatCon
 
                 var mask = ep.EntitySpottedState.SpottedByMask;
                 bool spottedByObserver = (mask[slot / 32] & (1u << (slot % 32))) != 0;
-                if (spottedByObserver) continue; // legitimately seen — not a wallhack candidate
+                if (spottedByObserver)
+                {
+                    // Whole-map sight memory for the blind-HS-burst edge: one legitimate sighting
+                    // permanently disqualifies this victim for this attacker.
+                    if (Config.EnableKillBurst) _killBurst.NoteSeen(slot, enemy.Slot);
+                    continue; // legitimately seen — not a wallhack candidate
+                }
 
                 var feet = new Vector3(ep.AbsOrigin.X, ep.AbsOrigin.Y, ep.AbsOrigin.Z);
                 float err = Geometry.NearestBodyAimError(eye, angles, feet);
