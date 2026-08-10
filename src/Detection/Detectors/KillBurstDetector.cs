@@ -20,6 +20,15 @@ namespace OSAntiCheat.Detection.Detectors;
 /// every (observer, enemy) spotted-mask hit at the 20 Hz wallhack poll via <see cref="NoteSeen"/>,
 /// and the pair set resets only on map change (or when a slot is vacated). The detector itself
 /// never reads game state — the plugin owns the wiring, this class owns the memory and the gate.
+///
+/// Below the edge sits an EARLY-WARNING tier (v0.9.93): 2 and 3 distinct blind-HS victims emit
+/// edge-less signals (fusion + admin awareness only, never auto-action). Measured rates say why
+/// the line is where it is: a single blind HS is routine (7,627 in the archive — prefire, sound,
+/// callouts), 2-in-window happens in 1.8% of sessions (120/6,664 — real suspicion, not proof),
+/// 3 is the honest maximum, 4 is machine zone. Per-KILL identification was measured and rejected:
+/// a "tracked a moving unseen target tightly" rule (path ≥100u, run-up aim ≤3°) matches 796
+/// honest kills — and ZERO of C5/C6's, whose silent aim never pointed the view at the victim at
+/// all. The way a single kill happens does not separate; the repetition on distinct victims does.
 /// </summary>
 public sealed class KillBurstDetector : IDetector
 {
@@ -29,6 +38,7 @@ public sealed class KillBurstDetector : IDetector
 
     private readonly int _minKills;        // distinct never-seen HS victims inside the window to fire
     private readonly float _windowSeconds; // rolling window the burst is evaluated over
+    private const int EarlyWarnFloor = 2;  // edge-less fusion signals start here (1 blind HS is routine)
 
     // Whole-map sight memory: (observer, enemy) pairs that have EVER been spotted. Fed by the
     // plugin's poll; a pair present here permanently disqualifies that victim for this attacker.
@@ -85,19 +95,28 @@ public sealed class KillBurstDetector : IDetector
         var distinctSlots = new HashSet<int>();
         foreach (var k in list) distinctSlots.Add(k.VictimSlot);
         int distinct = distinctSlots.Count;
-        if (distinct < _minKills) return null;
+        if (distinct < EarlyWarnFloor) return null;
         if (distinct <= _firedAt.GetValueOrDefault(attackerSlot)) return null; // already fired at this size
         _firedAt[attackerSlot] = distinct;
 
         float span = now - list[0].Time;
         var names = new List<string>();
         foreach (var k in list) if (!names.Contains(k.VictimName)) names.Add(k.VictimName);
+        string what =
+            $"{distinct} headshot kills in {span:F1}s on {distinct} different enemies never once seen " +
+            $"this map ({string.Join(", ", names)})";
+
+        if (distinct < _minKills)
+            // Early warning: suspicion for the fusion engine, never an action. 2-in-window occurs
+            // in 1.8% of honest sessions (sound + callouts); 3 is the measured honest maximum.
+            return new Signal(
+                Id, attackerSlot, now, distinct == 2 ? 0.4f : 0.6f,
+                what + " — early warning (honest sessions reach this ~1.8% of the time; 4 never)");
 
         float confidence = Math.Clamp(0.9f + 0.05f * (distinct - _minKills), 0.9f, 1f);
         return new Signal(
             Id, attackerSlot, now, confidence,
-            $"{distinct} headshot kills in {span:F1}s on {distinct} different enemies never once seen " +
-            $"this map ({string.Join(", ", names)}) — pre-aimed information no human channel provides",
+            what + " — pre-aimed information no human channel provides",
             Edge: "blind-hs-burst"); // ≥4 distinct: 2/321k archive kills, both confirmed cheaters (C5, C6)
     }
 }

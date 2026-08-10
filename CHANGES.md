@@ -4,6 +4,24 @@ Version history for OSAntiCheat, newest first. Every release gets an entry here;
 describes the current state only. Player/admin names follow the pseudonym scheme from
 [TODO.md](TODO.md) (Cn = typed cheater, Gn = griefer, Rn = regular, An = admin).
 
+## v0.9.93 — kill-burst early-warning tier (signal at 2, kick still at 4)
+
+Owner direction: identify the player as early as the data honestly allows. Measured per-KILL
+first (and rejected): a "tracked a moving unseen target tightly" rule (victim moved ≥100u in
+the run-up, mean aim error ≤3°) matches **796 honest kills** — sound-tracking is a skill — and
+**zero** of C5/C6's kills, whose silent aim never pointed the view at the victim at all. The way
+one kill happens does not separate; repetition on distinct victims does. What the distribution
+does allow:
+
+- 1 blind HS: routine (7,627 in the archive) — stays silent.
+- **2 distinct blind HS in-window: early-warning signal** (edge-less, confidence 0.4) — 1.8% of
+  honest sessions ever reach this (120/6,664), so it is suspicion for the fusion engine and
+  admin awareness, never an action.
+- **3: second warning** (confidence 0.6) — the measured honest maximum.
+- **4: the `blind-hs-burst` edge fires** (unchanged) → kick.
+
+No new config. 99 tests.
+
 ## v0.9.92 — blind-headshot-burst detection with auto-kick (blind-hs-burst edge)
 
 C8 (2026-08-07 seabase, video-confirmed wall+aim on a fresh account): an ace of **six scout
