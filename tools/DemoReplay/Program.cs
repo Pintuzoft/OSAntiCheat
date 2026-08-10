@@ -255,7 +255,8 @@ if (killsPath is not null)
     killsCsv = new StreamWriter(killsPath, append: true) { AutoFlush = false };
     if (freshKills) killsCsv.WriteLine("demo,attackerId,attackerName,victimId,victimName,round,tick,weapon,headshot,dmg," +
         "stillDegS,onTgtDeg,sig,blindTicks,aliveTicks,teamSeenTicks,victimPathU,victimNetU,frozenMs,shotsInHold," +
-        "sinceAttSawSec,sinceMateSawSec,distU,gatedSig,headErrFire,headErrPrev,headErrPrev2");
+        "sinceAttSawSec,sinceMateSawSec,distU,gatedSig,headErrFire,headErrPrev,headErrPrev2," +
+        "followMs,followSweptDeg,followDispU,followGapMs");
     killsCsv.Flush();
 }
 
@@ -376,7 +377,9 @@ await Parallel.ForEachAsync(demoFiles, new ParallelOptions { MaxDegreeOfParallel
                         $"{k.SinceAttSawSec.ToString("F1", CultureInfo.InvariantCulture)},{k.SinceMateSawSec.ToString("F1", CultureInfo.InvariantCulture)}," +
                         $"{k.DistU.ToString("F0", CultureInfo.InvariantCulture)},{k.GatedSig.ToString("F5", CultureInfo.InvariantCulture)}," +
                         $"{k.HeadErrFire.ToString("F3", CultureInfo.InvariantCulture)},{k.HeadErrPrev.ToString("F3", CultureInfo.InvariantCulture)}," +
-                        $"{k.HeadErrPrev2.ToString("F3", CultureInfo.InvariantCulture)}");
+                        $"{k.HeadErrPrev2.ToString("F3", CultureInfo.InvariantCulture)}," +
+                        $"{k.FollowMs.ToString("F0", CultureInfo.InvariantCulture)},{k.FollowSweptDeg.ToString("F0", CultureInfo.InvariantCulture)}," +
+                        $"{k.FollowDispU.ToString("F0", CultureInfo.InvariantCulture)},{k.FollowGapMs.ToString("F0", CultureInfo.InvariantCulture)}");
                 foreach (var h in hurtRows)
                     hurtsCsv?.WriteLine($"{Csv(Path.GetFileName(file))},{h.AttackerId},{Csv(h.AttackerName)},{h.VictimId}," +
                         $"{h.Round},{h.Tick},{Csv(h.Weapon)},{h.Dmg}," +
@@ -759,6 +762,9 @@ static async Task<(List<PlayerResult> players, List<ShotRow> shots, List<KillRow
     var maxFollowSweep = new Dictionary<int, float>();
     var maxFollowTick = new Dictionary<int, int>();
     var followStartPos = new Dictionary<(int obs, int enemy), Vector3>();  // enemy pos at follow start (diagnostic)
+    // Last COMPLETED follow episode per pair (endTime, durMs, sweptDeg, dispU) — the kill-anchored
+    // venn columns read this when the follow broke shortly before the kill (spotted-at-peek etc.).
+    var completedFollow = new Dictionary<(int obs, int enemy), (float end, float durMs, float swept, float disp)>();
     const float FollowCone = 5f;         // view must stay within this of the enemy
     const float FollowMoveSpeed = 60f;   // enemy must be MOVING (u/s), not a static hold
     const float FollowMinMs = 3000f;     // >=3s sustained to count
@@ -865,6 +871,7 @@ static async Task<(List<PlayerResult> players, List<ShotRow> shots, List<KillRow
         revisitState.Clear();
         followState.Clear();
         followStartPos.Clear();
+        completedFollow.Clear();
     };
 
     void Report(IDetector detector, Signal? signal)
@@ -1186,6 +1193,27 @@ static async Task<(List<PlayerResult> players, List<ShotRow> shots, List<KillRow
         }
         float headErrFire = HeadErrAt(0), headErrPrev = HeadErrAt(1), headErrPrev2 = HeadErrAt(2);
 
+        // Venn columns: the WALL circle (a sustained follow of this moving, unseen-by-attacker
+        // victim) meeting the AIM circle (this kill). Ongoing follow at the kill (the victim died
+        // mid-track) wins over the last completed episode; -1 = no follow on this pair this round.
+        float followMs = -1f, followSwept = -1f, followDisp = -1f, followGapMs = -1f;
+        var vKey = (aSlot, vSlot + 1);
+        if (followState.GetValueOrDefault(vKey).start > 0f)
+        {
+            var fs = followState[vKey];
+            followMs = (fs.lastTime - fs.start) * 1000f;
+            followSwept = fs.swept;
+            followDisp = haveOld ? Vector3.Distance(vOld, followStartPos.GetValueOrDefault(vKey)) : -1f;
+            followGapMs = MathF.Max(0f, (killT - fs.lastTime) * 1000f);
+        }
+        else if (completedFollow.TryGetValue(vKey, out var cf))
+        {
+            followMs = cf.durMs;
+            followSwept = cf.swept;
+            followDisp = cf.disp;
+            followGapMs = (killT - cf.end) * 1000f;
+        }
+
         kills.Add(new KillRow(
             att.SteamID, att.PlayerName ?? "?", victim.SteamID, victim.PlayerName ?? "?",
             roundNumber, demo.CurrentDemoTick.Value, w, e.Headshot,
@@ -1193,7 +1221,8 @@ static async Task<(List<PlayerResult> players, List<ShotRow> shots, List<KillRow
             meanSpeed, meanErr, signature, blind, aliveTicks, teamSeen,
             pathLen, netDisp, frozenMs, shotsInHold, sinceAtt, sinceMate,
             Vector3.Distance(aShot, vShot), gatedSig,
-            headErrFire, headErrPrev, headErrPrev2));
+            headErrFire, headErrPrev, headErrPrev2,
+            followMs, followSwept, followDisp, followGapMs));
 
         // --revisit-detail <steamId>: dump this attacker's kills for human review.
         if (revisitTarget != 0 && att.SteamID == revisitTarget)
@@ -1731,6 +1760,9 @@ static async Task<(List<PlayerResult> players, List<ShotRow> shots, List<KillRow
                     {
                         float dur = (fs.lastTime - fs.start) * 1000f;
                         float disp = Vector3.Distance(feet, followStartPos.GetValueOrDefault(fk));   // net enemy movement
+                        // Keep every non-trivial episode for the kill-anchor (thresholds live in
+                        // the analysis, not here — raw components, same contract as the kill rows).
+                        if (dur >= 600f) completedFollow[fk] = (fs.lastTime, dur, fs.swept, disp);
                         // A detector called "follow" must require FOLLOWING: the enemy's BEARING has
                         // to have swept across the view (lateral movement the aim had to track), not
                         // just net displacement. A standoff / radial approach (enemy walks toward you
@@ -2063,7 +2095,8 @@ internal readonly record struct KillRow(
     int BlindTicks, int AliveTicks, int TeamSeenTicks,
     float VictimPathU, float VictimNetU, float FrozenMs, int ShotsInHold,
     float SinceAttSawSec, float SinceMateSawSec, float DistU, float GatedSig,
-    float HeadErrFire, float HeadErrPrev, float HeadErrPrev2);   // aimbot.snap approach profile (N, N-1, N-2)
+    float HeadErrFire, float HeadErrPrev, float HeadErrPrev2,    // aimbot.snap approach profile (N, N-1, N-2)
+    float FollowMs, float FollowSweptDeg, float FollowDispU, float FollowGapMs); // venn: wall-follow meeting this kill (-1 = none)
 
 internal sealed record PlayerResult(
     string Demo, ulong SteamId, string Name, float PeakScore, float AliveMinutes,
