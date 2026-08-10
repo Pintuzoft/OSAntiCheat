@@ -14,7 +14,7 @@ public sealed class OSAntiCheatConfig : BasePluginConfig
     // a version bump — missing keys simply deserialize to the defaults below (so new detectors are
     // active even under a stale file). To get the file itself current: unload the plugin, move the
     // json away, load again — it regenerates at this version with every key present.
-    public override int Version { get; set; } = 21;
+    public override int Version { get; set; } = 22;
 
     /// <summary>
     /// Include bots as detection subjects. Bots have perfect server-driven aim so they trip the
@@ -35,6 +35,14 @@ public sealed class OSAntiCheatConfig : BasePluginConfig
     /// <summary>Admin permission flag required to receive in-chat alerts.</summary>
     [JsonPropertyName("AdminChatFlag")]
     public string AdminChatFlag { get; set; } = "@css/generic";
+
+    /// <summary>Minimum seconds between two Watch-tier admin chat notices, across all players —
+    /// keeps the chat readable when an axis fires broadly. Per player it is stricter still: one
+    /// Watch and one Review notice per map, ever. Review notices bypass this window (rare and
+    /// serious), auto-action notices are never throttled, and the JSONL log always gets every
+    /// alert. 0 disables the window.</summary>
+    [JsonPropertyName("AdminChatWatchQuietSeconds")]
+    public float AdminChatWatchQuietSeconds { get; set; } = 60f;
 
     /// <summary>Log every raw detector signal to file (not just tier escalations). Gives the
     /// full signal distribution needed to calibrate thresholds against real data.</summary>

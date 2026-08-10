@@ -59,6 +59,9 @@ public sealed class OSAntiCheatPlugin : BasePlugin, IPluginConfig<OSAntiCheatCon
 
     private SuspicionEngine _engine = new();
     private AlertSink? _alerts;
+    // Chat-only throttle: the engine re-raises tiers on every re-crossing of a decaying score,
+    // and admins must not be spammed off the regular chat. The log receives everything.
+    private AdminChatThrottle _chatThrottle = new();
 
     // Geometric LOS gate: current map's CS2FOW bake + per-(observer, enemy) blocking-packet
     // cache so near-stationary pairs skip the BVH descent (see docs/visibility-oracle.md).
@@ -110,6 +113,7 @@ public sealed class OSAntiCheatPlugin : BasePlugin, IPluginConfig<OSAntiCheatCon
         _aimDrift = new AimDriftDetector(
             config.AimDriftMinSteps, config.AimDriftMinZ,
             config.AimDriftMinPopSteps, config.AimDriftWeight);
+        _chatThrottle = new AdminChatThrottle(config.AdminChatWatchQuietSeconds);
     }
 
     public override void Load(bool hotReload)
@@ -207,6 +211,7 @@ public sealed class OSAntiCheatPlugin : BasePlugin, IPluginConfig<OSAntiCheatCon
                 _nullTest.Remove(player.Slot);
                 _killBurst.Remove(player.Slot);
                 _aimDrift.Remove(player.Slot);
+                _chatThrottle.Remove(player.Slot);
                 _lastFire.Remove(player.Slot);
                 int gone = player.Slot;
                 foreach (var pair in _geoCache.Keys.Where(k => k.Observer == gone || k.Enemy == gone).ToList())
@@ -447,6 +452,7 @@ public sealed class OSAntiCheatPlugin : BasePlugin, IPluginConfig<OSAntiCheatCon
         _killBurst.Reset();
         // Aim-drift baseline is the CURRENT map's lobby — per-map evidence like the null test.
         _aimDrift.Reset();
+        _chatThrottle.Reset(); // fresh map, fresh notice budget per player
         if (string.IsNullOrWhiteSpace(Config.BakesDir))
         {
             _bake.Clear();
@@ -758,8 +764,11 @@ public sealed class OSAntiCheatPlugin : BasePlugin, IPluginConfig<OSAntiCheatCon
         // Always log (JSON-lines + console) — the durable record.
         _alerts?.Handle(alert, player?.PlayerName, player?.SteamID.ToString(), responseClass);
 
-        // Additionally ping online admins in chat so they don't have to read logs.
-        if (Config.NotifyAdminsInChat)
+        // Additionally ping online admins in chat so they don't have to read logs — throttled so
+        // a hovering score or a broadly-firing axis can never drown the chat (once per player per
+        // tier per map; global quiet window between Watch notices; Review always delivered).
+        if (Config.NotifyAdminsInChat &&
+            _chatThrottle.ShouldNotify(alert.PlayerSlot, alert.Tier, Server.CurrentTime))
             NotifyAdmins(alert, player, responseClass);
     }
 

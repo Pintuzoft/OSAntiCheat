@@ -4,6 +4,21 @@ Version history for OSAntiCheat, newest first. Every release gets an entry here;
 describes the current state only. Player/admin names follow the pseudonym scheme from
 [TODO.md](TODO.md) (Cn = typed cheater, Gn = griefer, Rn = regular, An = admin).
 
+## v0.9.95 — admin chat throttle (notices must never drown the chat)
+
+Owner: admins get spammed off the regular chat if every tier event pings. The engine re-raises
+Watch every time a decaying score re-crosses the threshold (hover-spam), and a broadly-firing
+axis can raise many players in one round. New `AdminChatThrottle`, presentation-layer only —
+the JSONL/console log still records every alert:
+
+- One Watch notice and one Review notice per player per map, ever. Re-crossings go to the log.
+- Global quiet window between Watch notices (`AdminChatWatchQuietSeconds`, default 60; a
+  suppressed notice is delivered on the next raise after the window, not lost). Review notices
+  bypass the window; auto-action (kick) notices are never throttled.
+- Resets on map change and slot vacancy.
+
+Config version 22. 105 tests.
+
 ## v0.9.94 — aim.drift fusion axis + plain-language admin watch notices
 
 The C8 behaviour hunt (aim-pattern battery over 23 demos / 305 honest sessions) found the
