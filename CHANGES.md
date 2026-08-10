@@ -4,6 +4,31 @@ Version history for OSAntiCheat, newest first. Every release gets an entry here;
 describes the current state only. Player/admin names follow the pseudonym scheme from
 [TODO.md](TODO.md) (Cn = typed cheater, Gn = griefer, Rn = regular, An = admin).
 
+## v0.9.94 — aim.drift fusion axis + plain-language admin watch notices
+
+The C8 behaviour hunt (aim-pattern battery over 23 demos / 305 honest sessions) found the
+cross-archetype signature: the fraction of moving aim steps that REDUCE the error toward the
+nearest enemy. Honest population: median 51.1%, absolute max 56.6%, per-lobby-z max 2.79.
+C8 (soft aim): 59.6%, z=+4.40 — above every honest session, binomial z=+5.3 on 977 steps from
+ONE minute alive. C3 (multihack): 56.0%, z=+4.03. C5 (silent aim): 50.1% — structurally
+invisible to aim axes, stays owned by aimbot.silent. Retarget time corroborates the C8 type
+(0.125 s median target switches vs honest corpus minimum 0.14 s / p5 0.33 s) but the margin is
+one tick — profile colour, not a gate.
+
+- New `AimDriftDetector` (`aim.drift`, Behavioural, weight 0.5, NO edge — can never act alone):
+  tick-exact steps reconstructed from the ring buffers at the 20 Hz poll; votes gated on
+  `AimDriftMinSteps` (500 ≈ 30–60 s of engaged play — the step is the evidence unit, kills are
+  irrelevant), per-lobby two-proportion z ≥ `AimDriftMinZ` (3.0, above the honest max 2.79),
+  abstention below `AimDriftMinPopSteps` (3000) of lobby baseline, and one emission per integer
+  z band. Fluke tolerance is the design: a borderline session whispers one decaying signal;
+  reaching the Watch notice takes sustained drift or a second axis corroborating.
+- **Admin watch notices are now plain language** (owner: "admins don't get the numbers"):
+  `keep an eye on <name>: aim pulls toward enemies unusually often — could be luck, not proof`
+  instead of detector ids + scores. Numbers stay in the JSONL log for calibration. Auto-action
+  notices (CHEAT KICKED + steamid + evidence) are unchanged — kicks stay blunt.
+
+Config version 21. 102 tests.
+
 ## v0.9.93 — kill-burst early-warning tier (signal at 2, kick still at 4)
 
 Owner direction: identify the player as early as the data honestly allows. Measured per-KILL

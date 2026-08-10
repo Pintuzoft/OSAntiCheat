@@ -14,7 +14,7 @@ public sealed class OSAntiCheatConfig : BasePluginConfig
     // a version bump — missing keys simply deserialize to the defaults below (so new detectors are
     // active even under a stale file). To get the file itself current: unload the plugin, move the
     // json away, load again — it regenerates at this version with every key present.
-    public override int Version { get; set; } = 20;
+    public override int Version { get; set; } = 21;
 
     /// <summary>
     /// Include bots as detection subjects. Bots have perfect server-driven aim so they trip the
@@ -276,6 +276,37 @@ public sealed class OSAntiCheatConfig : BasePluginConfig
     /// inside 15 s.</summary>
     [JsonPropertyName("KillBurstWindowSeconds")]
     public float KillBurstWindowSeconds { get; set; } = 15f;
+
+    /// <summary>
+    /// Aim drift (aim.drift): fraction of the player's moving aim steps (>0.1°, nearest enemy
+    /// within 15°) that REDUCE the error toward that enemy, tested per-lobby (two-proportion z vs
+    /// everyone else on the map). Population-read on 305 honest sessions / 23 demos: median
+    /// 51.1%, absolute max 56.6%, per-lobby-z max 2.79 — while C8 (soft aim) sat at 59.6%
+    /// (z=+4.40) and C3 (multihack) at 56.0% (z=+4.03), both above every honest session.
+    /// Behavioural fusion axis, no edge: it can never kick; it raises the suspicion score so a
+    /// threshold crossing surfaces as the Watch-tier admin notice. Abstains when the lobby
+    /// baseline is thin. Blind to silent aim by construction (the view never moves).
+    /// </summary>
+    [JsonPropertyName("EnableAimDrift")]
+    public bool EnableAimDrift { get; set; } = true;
+
+    /// <summary>Moving engaged aim steps required before the drift rate is trusted (~30–60 s of
+    /// active combat; binomial SE at 500 is ±2.2%). No kills are needed — the step is the vote.</summary>
+    [JsonPropertyName("AimDriftMinSteps")]
+    public int AimDriftMinSteps { get; set; } = 500;
+
+    /// <summary>Per-lobby z at/above which the detector emits. Honest corpus max: 2.79 — keep ≥3.</summary>
+    [JsonPropertyName("AimDriftMinZ")]
+    public float AimDriftMinZ { get; set; } = 3.0f;
+
+    /// <summary>Rest-of-lobby steps required before the baseline is trusted; below it the
+    /// detector abstains entirely (a thin lobby is not a null).</summary>
+    [JsonPropertyName("AimDriftMinPopSteps")]
+    public int AimDriftMinPopSteps { get; set; } = 3000;
+
+    /// <summary>Fusion weight. Corroborating axis — same tier as the null test, never a verdict.</summary>
+    [JsonPropertyName("AimDriftWeight")]
+    public float AimDriftWeight { get; set; } = 0.5f;
 
     /// <summary>Headshot kills landed mid-spin before the spin-hs-kill edge fires. The first is always
     /// silent at 2 (a lucky HS mid-trickshot-360 is a fluke, not a bot); a spinbot re-qualifies every

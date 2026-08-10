@@ -55,6 +55,7 @@ public sealed class OSAntiCheatPlugin : BasePlugin, IPluginConfig<OSAntiCheatCon
     private WallhackGazeDetector _wallhackGaze = new();
     private NullTestDetector _nullTest = new();
     private KillBurstDetector _killBurst = new();
+    private AimDriftDetector _aimDrift = new();
 
     private SuspicionEngine _engine = new();
     private AlertSink? _alerts;
@@ -106,6 +107,9 @@ public sealed class OSAntiCheatPlugin : BasePlugin, IPluginConfig<OSAntiCheatCon
             minPopObservations: config.NullTestMinPopObservations);
         _killBurst = new KillBurstDetector(
             config.KillBurstMinKills, config.KillBurstWindowSeconds);
+        _aimDrift = new AimDriftDetector(
+            config.AimDriftMinSteps, config.AimDriftMinZ,
+            config.AimDriftMinPopSteps, config.AimDriftWeight);
     }
 
     public override void Load(bool hotReload)
@@ -123,7 +127,7 @@ public sealed class OSAntiCheatPlugin : BasePlugin, IPluginConfig<OSAntiCheatCon
         // Map each detector to its response class so an alert can be labelled by the highest tier
         // that contributed (a LogicBreach signal makes the whole alert "beyond human").
         foreach (IDetector d in new IDetector[]
-                 { _aimbot, _triggerbot, _spinbot, _boneLock, _recoil, _silent, _antiAim, _snap, _nameChange, _wallhack, _wallhackGaze, _nullTest, _killBurst })
+                 { _aimbot, _triggerbot, _spinbot, _boneLock, _recoil, _silent, _antiAim, _snap, _nameChange, _wallhack, _wallhackGaze, _nullTest, _killBurst, _aimDrift })
             _detectorKinds[d.Id] = d.Kind;
 
         Logger.LogInformation(
@@ -202,6 +206,7 @@ public sealed class OSAntiCheatPlugin : BasePlugin, IPluginConfig<OSAntiCheatCon
                 _wallhackGaze.Remove(player.Slot);
                 _nullTest.Remove(player.Slot);
                 _killBurst.Remove(player.Slot);
+                _aimDrift.Remove(player.Slot);
                 _lastFire.Remove(player.Slot);
                 int gone = player.Slot;
                 foreach (var pair in _geoCache.Keys.Where(k => k.Observer == gone || k.Enemy == gone).ToList())
@@ -440,6 +445,8 @@ public sealed class OSAntiCheatPlugin : BasePlugin, IPluginConfig<OSAntiCheatCon
         // Kill-burst sight memory is whole-map by the same token: "never seen" restarts with the
         // map, exactly like the offline validation (one demo = one map session).
         _killBurst.Reset();
+        // Aim-drift baseline is the CURRENT map's lobby — per-map evidence like the null test.
+        _aimDrift.Reset();
         if (string.IsNullOrWhiteSpace(Config.BakesDir))
         {
             _bake.Clear();
@@ -454,9 +461,10 @@ public sealed class OSAntiCheatPlugin : BasePlugin, IPluginConfig<OSAntiCheatCon
     private void PollWallhack()
     {
         // Kill-burst rides this poll too: it only needs the spotted-mask reads the loop already
-        // does, to feed its whole-map "has attacker ever seen victim" memory.
+        // does, to feed its whole-map "has attacker ever seen victim" memory. Aim-drift likewise
+        // consumes the ring buffers here (tick-exact, so poll cadence doesn't coarsen it).
         if (!Config.EnableWallhack && !Config.EnableWallhackGaze && !Config.EnableNullTest &&
-            !Config.EnableKillBurst) return;
+            !Config.EnableKillBurst && !Config.EnableAimDrift) return;
 
         float now = Server.CurrentTime;
         float aimThreshold = Config.WallhackAimThresholdDeg;
@@ -578,6 +586,8 @@ public sealed class OSAntiCheatPlugin : BasePlugin, IPluginConfig<OSAntiCheatCon
                 Report(_wallhackGaze, _wallhackGaze.Observe(slot, now, bestGaze));
             if (Config.EnableNullTest)
                 Report(_nullTest, _nullTest.Accumulate(slot, now, ntNowOnly, ntPastOnly));
+            if (Config.EnableAimDrift && _tracking.For(slot) is { } obsTracker)
+                Report(_aimDrift, _aimDrift.Observe(obsTracker, EnemyTrackersOf(observer), now));
         }
     }
 
@@ -753,23 +763,48 @@ public sealed class OSAntiCheatPlugin : BasePlugin, IPluginConfig<OSAntiCheatCon
             NotifyAdmins(alert, player, responseClass);
     }
 
+    /// <summary>Plain-language hint per detector id for admin chat. Owner's requirement: admins
+    /// get a hint of WHAT looked odd, in words — never raw numbers, never detector jargon — and
+    /// the framing must say "worth watching", not "cheater".</summary>
+    private static string DetectorHint(string id) => id switch
+    {
+        "aim.drift" => "aim pulls toward enemies unusually often",
+        "wallhack.nulltest" => "aims where hidden players ARE, not where they were",
+        "wallhack.killburst" => "several quick headshots on players they never saw",
+        "wallhack.track" => "follows hidden players through walls",
+        "wallhack.gaze" => "watches hidden players through walls",
+        "aimbot.snap" => "aim jumps straight onto heads",
+        "aimbot.bonelock" => "aim locks dead-centre on heads",
+        "aimbot.sweep" => "hits mid-swing more than usual",
+        "aimbot.silent" => "hits without looking at the target",
+        "anti-recoil" => "recoil control looks mechanical",
+        "triggerbot" => "fires the instant a target crosses the crosshair",
+        "spinbot" => "impossible spinning",
+        "antiaim" => "impossible view angles",
+        "namechanger" => "rapid name changes",
+        _ => id,
+    };
+
     private void NotifyAdmins(SuspicionAlert alert, CCSPlayerController? subject,
         DetectorKind responseClass = DetectorKind.Behavioural)
     {
         string name = subject?.PlayerName ?? $"slot {alert.PlayerSlot}";
-        string detectors = string.Join(", ", alert.RecentSignals
+        string hints = string.Join("; ", alert.RecentSignals
             .Select(s => s.Detector)
-            .Distinct());
+            .Distinct()
+            .Select(DetectorHint));
 
-        // Beyond-human breaches scream (red); improbable review flags whisper "could be luck" (yellow).
+        // Beyond-human breaches scream (red); improbable review flags whisper "could be luck"
+        // (yellow). No numbers in chat — the z-scores and rates live in the log for calibration;
+        // the admin gets the behaviour in words and a "not proof" framing (owner's requirement).
         bool breach = responseClass == DetectorKind.LogicBreach;
-        string label = breach ? "LOGIC BREACH" : "review — could be luck";
+        string label = breach ? "LOOKS BEYOND HUMAN" : "keep an eye on";
         char labelColor = breach ? ChatColors.Red : ChatColors.Yellow;
+        string caveat = breach ? "" : " — could be luck, not proof";
 
         string message =
-            $" {ChatColors.Red}[OSAC]{ChatColors.Default} {labelColor}{label}{ChatColors.Default}: " +
-            $"{ChatColors.Green}{name}{ChatColors.Default} " +
-            $"(score {alert.Score:F1}) — {detectors}";
+            $" {ChatColors.Red}[OSAC]{ChatColors.Default} {labelColor}{label}{ChatColors.Default} " +
+            $"{ChatColors.Green}{name}{ChatColors.Default}: {hints}{caveat}";
 
         foreach (var admin in Utilities.GetPlayers())
         {
