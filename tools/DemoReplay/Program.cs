@@ -213,6 +213,8 @@ var snapHits = new List<(string name, ulong id, int snaps, int shots, float best
 var silentAlerts = new List<(string name, ulong id, int signals, string demo)>();
 var antiAimAlerts = new List<(string name, ulong id, int signals, string demo)>();
 var nullTestHits = new List<(string name, ulong id, float excess, int n, string demo)>();
+var gainResults = new List<(string name, ulong id, float slope, float corr, int n, float deg, float audSlope, int audN, string demo)>();
+var shellResults = new List<(string name, ulong id, float onFrac, float donutFrac, int vis, int esc, float escMaxMs, string demo)>();
 var topResults = new List<PlayerResult>();
 const int TopKeep = 40;
 var gate = new object();
@@ -232,7 +234,7 @@ if (csvPath is not null)
     // (resume granularity is a whole demo anyway), thousands of times fewer syscalls.
     csv = new StreamWriter(csvPath, append: true) { AutoFlush = false };
     // aliveMinutes is the exposure: without it you cannot compute a rate or a Poisson baseline.
-    if (fresh) csv.WriteLine("demo,steamId,name,peakScore,aliveMinutes,wallhackTrack,aimbotSweep,triggerbot,shots,hits,headshots,unseenSamples,unseenNow,unseenPast,kills,killWall,killStill,killOnTgt,recoilSprays,recoilConsist,recoilPull,recoilRatio,revisits,maxPeekDepth,followMs,followSweep,followTick,killWallMax,headN,headSpike,spinMaxYaw,spinHits,spinHsKills,silentAim,antiAim");
+    if (fresh) csv.WriteLine("demo,steamId,name,peakScore,aliveMinutes,wallhackTrack,aimbotSweep,triggerbot,shots,hits,headshots,unseenSamples,unseenNow,unseenPast,kills,killWall,killStill,killOnTgt,recoilSprays,recoilConsist,recoilPull,recoilRatio,revisits,maxPeekDepth,followMs,followSweep,followTick,killWallMax,headN,headSpike,spinMaxYaw,spinHits,spinHsKills,silentAim,antiAim,visPolls,shellOn,shellDonut,escortN,escortMs,escortMaxMs,gainSilentN,gainSilentSlope,gainSilentCorr,gainSilentDeg,gainAudN,gainAudSlope");
     csv.Flush();
 }
 
@@ -317,6 +319,15 @@ await Parallel.ForEachAsync(demoFiles, new ParallelOptions { MaxDegreeOfParallel
                 foreach (var r in results)
                     if (r.FollowMs > 0)
                         followResults.Add((r.Name, r.SteamId, r.FollowMs, r.FollowSweep, r.FollowTick, Path.GetFileName(r.Demo)));
+                // Bubble-shell raw axes: minimum-exposure gates only (~10s of accumulated lateral
+                // motion / ~20s with a visible enemy), so the report ranks measurements, not noise.
+                foreach (var r in results)
+                    if (r.GainSilentN >= 150)
+                        gainResults.Add((r.Name, r.SteamId, r.GainSilentSlope, r.GainSilentCorr, r.GainSilentN, r.GainSilentDeg, r.GainAudSlope, r.GainAudN, Path.GetFileName(r.Demo)));
+                foreach (var r in results)
+                    if (r.VisPolls >= 400)
+                        shellResults.Add((r.Name, r.SteamId, r.ShellOn / (float)r.VisPolls, r.ShellDonut / (float)r.VisPolls,
+                            r.VisPolls, r.EscortN, r.EscortMaxMs, Path.GetFileName(r.Demo)));
                 // Multi-detector sweep collections: every kill's gatedSig for the distribution, the
                 // extreme rows for review, and any player whose head-precision spiked repeatedly.
                 foreach (var k in killRows)
@@ -558,6 +569,36 @@ if (followResults.Count > 0)
         Console.WriteLine($"    {r.ms / 1000f,4:F1}s  swept {r.sweep,4:F0}deg  tick {r.tick,-8}  {r.name,-22} {r.id,-18} [{r.demo}]");
 }
 
+// wallhack.gain: continuous follow-gain toward unseen enemies. slope ~1 + high corr = the yaw
+// rotates with the enemy's lateral motion through the wall (a continuous position feed no sound
+// or radar explains — those samples are gated out / kept as the audible control column).
+if (gainResults.Count > 0)
+{
+    var corrs = gainResults.Select(r => r.corr).OrderBy(x => x).ToList();
+    float CQ(double p) => corrs[Math.Clamp((int)(p * (corrs.Count - 1)), 0, corrs.Count - 1)];
+    Console.WriteLine($"\n=== wallhack.gain (yaw rotates WITH an unseen, silent, off-radar enemy) over {gainResults.Count} sessions ===");
+    Console.WriteLine($"  silent-corr distribution: p50 {CQ(.50):F2}  p90 {CQ(.90):F2}  p99 {CQ(.99):F2}  max {corrs[^1]:F2}");
+    Console.WriteLine("  top by silent corr — corr | slope | n | lateral deg offered | audible control:");
+    foreach (var r in gainResults.OrderByDescending(r => r.corr).Take(20))
+        Console.WriteLine($"    corr {r.corr,5:F2}  slope {r.slope,5:F2}  n={r.n,5}  {r.deg,5:F0}deg  " +
+                          $"(audible: slope {r.audSlope,5:F2} n={r.audN,5})  {r.name,-22} {r.id,-18} [{r.demo}]");
+}
+
+// softaim.shell: crosshair occupancy of the distance-scaled donut around the nearest VISIBLE
+// enemy. A soft-aim parks in the donut (escort) instead of committing to the model; read the
+// donut fraction and escort episodes off the population before judging anyone.
+if (shellResults.Count > 0)
+{
+    var df = shellResults.Select(r => r.donutFrac).OrderBy(x => x).ToList();
+    float DQ(double p) => df[Math.Clamp((int)(p * (df.Count - 1)), 0, df.Count - 1)];
+    Console.WriteLine($"\n=== softaim.shell (visible-enemy bubble occupancy) over {shellResults.Count} sessions ===");
+    Console.WriteLine($"  donut-fraction distribution: p50 {DQ(.50):P1}  p90 {DQ(.90):P1}  p99 {DQ(.99):P1}  max {df[^1]:P1}");
+    Console.WriteLine("  top by donut fraction — donut | on-model | polls | escorts (>=0.5s donut-ride) | longest:");
+    foreach (var r in shellResults.OrderByDescending(r => r.donutFrac).Take(20))
+        Console.WriteLine($"    donut {r.donutFrac,6:P1}  on {r.onFrac,6:P1}  n={r.vis,5}  escorts {r.esc,3}  " +
+                          $"max {r.escMaxMs / 1000f,4:F1}s  {r.name,-22} {r.id,-18} [{r.demo}]");
+}
+
 return 0;
 
 // One line that rewrites itself, rather than 17k lines of scrollback.
@@ -579,6 +620,17 @@ static void DrawProgress(int done, int total, DateTime started, int failed)
     Console.Write($"\r  [{bar}] {pct,5:F1}%  {processed}/{total}  {perMin,4:F0}/min  ETA {eta:hh\\:mm\\:ss}{fail}   ");
 }
 
+static (float slope, float corr) GainFit(GainAcc? a)
+{
+    if (a is null || a.N < 2) return (0f, 0f);
+    double n = a.N;
+    double cov = a.Sxy - a.Sx * a.Sy / n;
+    double vx = a.Sxx - a.Sx * a.Sx / n;
+    double vy = a.Syy - a.Sy * a.Sy / n;
+    if (vx <= 1e-9) return (0f, 0f);
+    return ((float)(cov / vx), vy <= 1e-9 ? 0f : (float)(cov / Math.Sqrt(vx * vy)));
+}
+
 static string CsvRow(PlayerResult r) =>
     $"{Csv(Path.GetFileName(r.Demo))},{r.SteamId},{Csv(r.Name)}," +
     $"{r.PeakScore.ToString("F3", CultureInfo.InvariantCulture)}," +
@@ -594,7 +646,12 @@ static string CsvRow(PlayerResult r) =>
     $"{r.FollowMs.ToString("F0", CultureInfo.InvariantCulture)},{r.FollowSweep.ToString("F0", CultureInfo.InvariantCulture)},{r.FollowTick}," +
     $"{r.KillWallMax.ToString("F5", CultureInfo.InvariantCulture)},{r.HeadN},{r.HeadSpike}," +
     $"{r.SpinMaxYaw.ToString("F0", CultureInfo.InvariantCulture)},{r.SpinHits},{r.SpinHsKills}," +
-    $"{r.Signals.GetValueOrDefault("aimbot.silent")},{r.Signals.GetValueOrDefault("antiaim")}";
+    $"{r.Signals.GetValueOrDefault("aimbot.silent")},{r.Signals.GetValueOrDefault("antiaim")}," +
+    $"{r.VisPolls},{r.ShellOn},{r.ShellDonut},{r.EscortN}," +
+    $"{r.EscortMs.ToString("F0", CultureInfo.InvariantCulture)},{r.EscortMaxMs.ToString("F0", CultureInfo.InvariantCulture)}," +
+    $"{r.GainSilentN},{r.GainSilentSlope.ToString("F3", CultureInfo.InvariantCulture)}," +
+    $"{r.GainSilentCorr.ToString("F3", CultureInfo.InvariantCulture)},{r.GainSilentDeg.ToString("F1", CultureInfo.InvariantCulture)}," +
+    $"{r.GainAudN},{r.GainAudSlope.ToString("F3", CultureInfo.InvariantCulture)}";
 
 static string Csv(string s) => s.Contains(',') || s.Contains('"') ? $"\"{s.Replace("\"", "\"\"")}\"" : s;
 
@@ -777,6 +834,63 @@ static async Task<(List<PlayerResult> players, List<ShotRow> shots, List<KillRow
                                          // approach (enemy walks toward you) sweeps ~0° despite moving
                                          // 300u+: that's a held angle, not a follow. The name earns its keep.
 
+    // --- bubble shells (the "förstora gubbarna" idea, 2026-08-12): angular shells around each
+    // enemy, scaled to the enemy's PROJECTED size — r(d) = atan(halfWidth/d), so the bubble grows
+    // exactly as the model shrinks with distance. Two raw axes share the geometry:
+    //
+    //   softaim.shell (VISIBLE enemy): where does the crosshair sit relative to the silhouette —
+    //     on-model, in the donut (r..3r], or outside? A soft-aim with an FOV cap + smoothing pulls
+    //     into the donut and PARKS there ("escort"): it rides alongside a moving enemy without
+    //     converging. Humans either commit to the model (spray/tap) or wander off; they don't
+    //     escort. Occupancy fractions + escort episodes are the raw read.
+    //
+    //   wallhack.gain (OCCLUDED enemy): does the observer's yaw ROTATE WITH the lateral motion of
+    //     an enemy they cannot see, hear, or read off team radar? Per poll, split the bearing
+    //     change into the enemy-motion part x (enemy moved, observer held still) and the parallax
+    //     part (observer moved, enemy held still); y = observer's yaw delta MINUS the parallax
+    //     part. Holding a fixed doorway while strafing gives y~=0 (the subtraction eats it); being
+    //     glued to the enemy gives y~=x. Regress y on x over the demo: slope ~1 with high corr =
+    //     a continuous position feed. Footsteps give coarse position, not a continuous angular
+    //     track — audible samples are kept as their own control column. This is the CONTINUOUS
+    //     replacement for the falsified sprint-track event counting.
+    const float ShellHalfWidthU = 20f;      // projected half-width of a player model (torso+arms)
+    const float ShellDonutScale = 3f;       // donut = (r .. 3r]
+    const float ShellMaxDeg = 20f;          // nearest visible enemy farther off than this = not in play
+    const float EscortMinMs = 500f;         // donut-ride shorter than this = a pass-through, not a park
+    const float GainEnterScale = 4f;        // gain-episode entry cone = clamp(4r, 4..15deg): entry is a
+                                            // ONE-TIME condition so per-sample inclusion doesn't select
+                                            // for "kept following" (that bias would manufacture slope)
+    const float GainEnterMinDeg = 4f;
+    const float GainEnterMaxDeg = 15f;
+    const float GainExitDeg = 30f;          // clearly left the neighbourhood -> episode over
+    const float GainMinLateralDeg = 0.04f;  // per-poll enemy-motion floor (~0.8deg/s): below it x is quant noise
+    const float GainMaxStepDeg = 30f;       // enemy bearing jumped more in one poll = teleport/respawn, drop
+    var visPolls = new Dictionary<int, int>();      // polls with a visible enemy in play
+    var shellOn = new Dictionary<int, int>();       //   ...crosshair inside the silhouette
+    var shellDonut = new Dictionary<int, int>();    //   ...in the donut
+    var escortState = new Dictionary<(int obs, int enemy), (float start, float lastTime)>();
+    var escortN = new Dictionary<int, int>();
+    var escortMsSum = new Dictionary<int, float>();
+    var escortMsMax = new Dictionary<int, float>();
+    var gainEp = new Dictionary<(int obs, int enemy), float>();   // active gain episode -> last update time
+    var gainSilent = new Dictionary<int, GainAcc>();  // headline: enemy inaudible (and off team radar)
+    var gainAudible = new Dictionary<int, GainAcc>(); // control: audible enemies
+    var prevPoll = new Dictionary<int, (Vector3 feet, float yaw)>();  // last poll's snapshot, for per-poll deltas
+    float prevPollTime = -1f;
+
+    void CloseEscort((int obs, int enemy) k)
+    {
+        if (!escortState.TryGetValue(k, out var st)) return;
+        escortState.Remove(k);
+        float dur = (st.lastTime - st.start) * 1000f;
+        if (dur < EscortMinMs) return;
+        escortN[k.obs] = escortN.GetValueOrDefault(k.obs) + 1;
+        escortMsSum[k.obs] = escortMsSum.GetValueOrDefault(k.obs) + dur;
+        if (dur > escortMsMax.GetValueOrDefault(k.obs)) escortMsMax[k.obs] = dur;
+    }
+    static float BearingYawDeg(Vector3 from, Vector3 to) =>
+        MathF.Atan2(to.Y - from.Y, to.X - from.X) * (180f / MathF.PI);
+
     void FlushSpray(int s)
     {
         if (sprayCurve.TryGetValue(s, out var curve) && curve.Count >= MinSprayShots &&
@@ -872,6 +986,10 @@ static async Task<(List<PlayerResult> players, List<ShotRow> shots, List<KillRow
         followState.Clear();
         followStartPos.Clear();
         completedFollow.Clear();
+        escortState.Clear();
+        gainEp.Clear();
+        prevPoll.Clear();
+        prevPollTime = -1f;
     };
 
     void Report(IDetector detector, Signal? signal)
@@ -1632,6 +1750,25 @@ static async Task<(List<PlayerResult> players, List<ShotRow> shots, List<KillRow
         bool roundStart = now - roundStartTime < 20f;
         var players = demo.Players.ToList();
 
+        // Per-poll position snapshot (bots included — they matter as ENEMIES even when not scored)
+        // + alive-team radar bits for the wallhack.gain "off radar" gate: a live teammate's spot
+        // puts the enemy on the observer's radar, which legitimately feeds continuous tracking.
+        var curPoll = new Dictionary<int, (Vector3 feet, float yaw)>();
+        ulong tAliveBits = 0UL, ctAliveBits = 0UL;
+        foreach (var pl in players)
+        {
+            if (!pl.PawnIsAlive) continue;
+            var plTeam = pl.CSTeamNum;
+            if (plTeam != CSTeamNumber.Terrorist && plTeam != CSTeamNumber.CounterTerrorist) continue;
+            var plPawn = pl.PlayerPawn;
+            if (plPawn is null) continue;
+            int plSlot = (int)pl.EntityIndex.Value - 1;
+            if (plSlot is < 0 or > 63) continue;
+            curPoll[plSlot] = (new Vector3(plPawn.Origin.X, plPawn.Origin.Y, plPawn.Origin.Z), plPawn.EyeAngles.Yaw);
+            if (plTeam == CSTeamNumber.Terrorist) tAliveBits |= 1UL << plSlot; else ctAliveBits |= 1UL << plSlot;
+        }
+        bool pollContig = prevPollTime > 0f && now - prevPollTime <= pollInterval * 2.5f;
+
         foreach (var observer in players)
         {
             if (!observer.PawnIsAlive) continue;
@@ -1663,6 +1800,10 @@ static async Task<(List<PlayerResult> players, List<ShotRow> shots, List<KillRow
             float bestAimErr = 5f;
             WallhackGazeDetector.GazeSample? bestGaze = null;
             float bestGazeErr = 25f;
+            int bestVisId = 0;                  // nearest VISIBLE enemy, for the softaim.shell pass
+            float bestVisErr = ShellMaxDeg;
+            Vector3 bestVisFeet = default;
+            float bestVisSpeed = 0f;
 
             // Clutch gate for wallhack.revisit: how many enemies are still alive right now. A precise
             // double-park is only telling when there are few enemies to coincidentally cover.
@@ -1679,15 +1820,27 @@ static async Task<(List<PlayerResult> players, List<ShotRow> shots, List<KillRow
                 var ep = enemy.PlayerPawn;
                 if (ep is null) continue;
 
-                // Only enemies NOT spotted by this observer count — the wallhack premise.
                 var mask = ep.EntitySpottedState.SpottedByMask;
                 if (mask is null || mask.Length <= slot / 32) continue;
-                if ((mask[slot / 32] & (1u << (slot % 32))) != 0) continue;
 
                 int enemyId = (int)enemy.EntityIndex.Value;
                 var feet = new Vector3(ep.Origin.X, ep.Origin.Y, ep.Origin.Z);
                 float err = Geometry.NearestBodyAimError(eye, angles, feet);
                 float bearingYaw = MathF.Atan2(feet.Y - eye.Y, feet.X - eye.X) * (180f / MathF.PI);
+
+                // Spotted by this observer -> VISIBLE: feed the softaim.shell pass (nearest visible
+                // enemy only) and skip the wallhack axes, which need the unspotted premise.
+                if ((mask[slot / 32] & (1u << (slot % 32))) != 0)
+                {
+                    if (err < bestVisErr)
+                    {
+                        float vspd = 0f;
+                        if (trackers.TryGetValue(enemyId - 1, out var vTr) && vTr.Count >= 2)
+                        { float dtv = vTr[0].Time - vTr[1].Time; if (dtv > 0f) vspd = Vector3.Distance(vTr[0].Origin, vTr[1].Origin) / dtv; }
+                        bestVisErr = err; bestVisId = enemyId; bestVisFeet = feet; bestVisSpeed = vspd;
+                    }
+                    continue;
+                }
 
                 // wallhack.revisit: in a clutch, does the observer PARK ~1s on a SILENT (still or
                 // sneaking) unseen enemy, glance away, and re-acquire the SAME enemy ~1s? No sound + no
@@ -1787,6 +1940,57 @@ static async Task<(List<PlayerResult> players, List<ShotRow> shots, List<KillRow
                     followState[fk] = fs;
                 }
 
+                // wallhack.gain: while parked NEAR the unseen enemy (inside the distance-scaled
+                // bubble), does the yaw rotate WITH the enemy's lateral motion? See the bubble
+                // comment at the declarations for the x / parallax / y construction. The episode
+                // ends when the aim clearly leaves (30deg), the enemy lands on the observer's team
+                // radar, or the pair goes stale (spotted/died — swept below). Pitch is ignored:
+                // lateral bearing is yaw geometry, same convention as wallhack.follow.
+                {
+                    var gk = (slot, enemyId);
+                    int eSlotG = enemyId - 1;
+                    float espeedG = 0f;
+                    if (trackers.TryGetValue(eSlotG, out var eTg) && eTg.Count >= 2)
+                    { float dtg = eTg[0].Time - eTg[1].Time; if (dtg > 0f) espeedG = Vector3.Distance(eTg[0].Origin, eTg[1].Origin) / dtg; }
+
+                    ulong epacked = 0UL;
+                    if (mask.Length > 0) epacked |= mask[0];
+                    if (mask.Length > 1) epacked |= ((ulong)mask[1]) << 32;
+                    bool onTeamRadar = (epacked & (team == CSTeamNumber.Terrorist ? tAliveBits : ctAliveBits)) != 0UL;
+
+                    float distG = Vector3.Distance(eye, feet);
+                    float rDegG = MathF.Atan(ShellHalfWidthU / MathF.Max(distG, 1f)) * (180f / MathF.PI);
+                    float enterDeg = Math.Clamp(GainEnterScale * rDegG, GainEnterMinDeg, GainEnterMaxDeg);
+
+                    bool inEp = gainEp.TryGetValue(gk, out var gLast);
+                    if (onTeamRadar || err > GainExitDeg) { if (inEp) gainEp.Remove(gk); }
+                    else if (!inEp)
+                    {
+                        if (err <= enterDeg && espeedG > FollowMoveSpeed) gainEp[gk] = now;
+                    }
+                    else
+                    {
+                        if (pollContig && now - gLast <= pollInterval * 2.5f &&
+                            prevPoll.TryGetValue(slot, out var po) && prevPoll.TryGetValue(eSlotG, out var pe) &&
+                            !SmokeBlocks(eye, feet, now))
+                        {
+                            var pEye = po.feet + new Vector3(0f, 0f, 64f);
+                            float x = Geometry.YawDelta(BearingYawDeg(eye, pe.feet), BearingYawDeg(eye, feet));        // enemy moved
+                            float dPar = Geometry.YawDelta(BearingYawDeg(pEye, pe.feet), BearingYawDeg(eye, pe.feet)); // observer moved
+                            float y = Geometry.YawDelta(po.yaw, angles.Yaw) - dPar;
+                            if (MathF.Abs(x) >= GainMinLateralDeg && MathF.Abs(x) <= GainMaxStepDeg && MathF.Abs(y) <= 60f)
+                            {
+                                var obsFeet = eye - new Vector3(0f, 0f, 64f);
+                                var accs = VictimAudibleTo(eSlotG, obsFeet, now, espeedG) ? gainAudible : gainSilent;
+                                if (!accs.TryGetValue(slot, out var acc)) accs[slot] = acc = new GainAcc();
+                                acc.N++; acc.Sx += x; acc.Sy += y; acc.Sxx += (double)x * x;
+                                acc.Sxy += (double)x * y; acc.Syy += (double)y * y; acc.AbsX += MathF.Abs(x);
+                            }
+                        }
+                        gainEp[gk] = now;
+                    }
+                }
+
                 // THE NULL TEST. Every metric built here so far asks how GOOD a player is, and a
                 // cheat with aim assist just makes someone statistically excellent - which is what
                 // it is sold to do. So levels overlap, the six measured all landed at 1.2-1.8x,
@@ -1839,11 +2043,39 @@ static async Task<(List<PlayerResult> players, List<ShotRow> shots, List<KillRow
                 }
             }
 
+            // softaim.shell: classify the nearest VISIBLE enemy against its silhouette shells.
+            // Nearest only — with two visible enemies the crosshair can't meaningfully be "in the
+            // donut" of the far one while fighting the near one.
+            if (bestVisId != 0)
+            {
+                visPolls[slot] = visPolls.GetValueOrDefault(slot) + 1;
+                float distV = Vector3.Distance(eye, bestVisFeet);
+                float rDegV = MathF.Atan(ShellHalfWidthU / MathF.Max(distV, 1f)) * (180f / MathF.PI);
+                bool inDonut = bestVisErr > rDegV && bestVisErr <= ShellDonutScale * rDegV;
+                if (bestVisErr <= rDegV) shellOn[slot] = shellOn.GetValueOrDefault(slot) + 1;
+                else if (inDonut) shellDonut[slot] = shellDonut.GetValueOrDefault(slot) + 1;
+
+                var ek = (slot, bestVisId);
+                if (inDonut && bestVisSpeed > FollowMoveSpeed)
+                    escortState[ek] = escortState.TryGetValue(ek, out var st) ? (st.start, now) : (now, now);
+                else
+                    CloseEscort(ek);   // converged onto the model, left, or the enemy stopped
+            }
+
             Report(wallhack, wallhack.Observe(slot, now, bestAim));
 
             float score = engine.ScoreOf(slot, now);
             if (score > peakScore.GetValueOrDefault(slot)) peakScore[slot] = score;
         }
+
+        // Episodes whose pair didn't come up this poll ended for a reason the pair loop couldn't
+        // see (enemy spotted/died, observer died): close/expire them here.
+        foreach (var k in escortState.Where(kv => kv.Value.lastTime < now).Select(kv => kv.Key).ToList())
+            CloseEscort(k);
+        foreach (var k in gainEp.Where(kv => kv.Value < now).Select(kv => kv.Key).ToList())
+            gainEp.Remove(k);
+        prevPoll = curPoll;
+        prevPollTime = now;
     };
 
     await using var raw = File.OpenRead(file);
@@ -2034,10 +2266,26 @@ static async Task<(List<PlayerResult> players, List<ShotRow> shots, List<KillRow
         spinMax.GetValueOrDefault(kv.Key),
         spinHits.GetValueOrDefault(kv.Key),
         spinHsKills.GetValueOrDefault(kv.Key),
+        visPolls.GetValueOrDefault(kv.Key),
+        shellOn.GetValueOrDefault(kv.Key),
+        shellDonut.GetValueOrDefault(kv.Key),
+        escortN.GetValueOrDefault(kv.Key),
+        escortMsSum.GetValueOrDefault(kv.Key),
+        escortMsMax.GetValueOrDefault(kv.Key),
+        gainSilent.GetValueOrDefault(kv.Key)?.N ?? 0,
+        GainFit(gainSilent.GetValueOrDefault(kv.Key)).slope,
+        GainFit(gainSilent.GetValueOrDefault(kv.Key)).corr,
+        (float)(gainSilent.GetValueOrDefault(kv.Key)?.AbsX ?? 0.0),
+        gainAudible.GetValueOrDefault(kv.Key)?.N ?? 0,
+        GainFit(gainAudible.GetValueOrDefault(kv.Key)).slope,
         signals.Where(s => s.Key.slot == kv.Key).ToDictionary(s => s.Key.detector, s => s.Value)))
         .ToList();
     return (playerRows, shots, kills, hurtRows, encounterRows, rotationRows);
 }
+
+// Regression accumulator for wallhack.gain: y (residual observer yaw delta) on x (enemy-motion
+// bearing delta), plain least squares over the whole demo. AbsX = total lateral degrees offered.
+internal sealed class GainAcc { public int N; public double Sx, Sy, Sxx, Sxy, Syy, AbsX; }
 
 internal readonly record struct ShotRow(
     ulong SteamId, string Name, float AimErrDeg, float SwitchMs, float SwitchDeg, float OnTargetMs,
@@ -2105,7 +2353,10 @@ internal sealed record PlayerResult(
     int Kills, float KillWall, float KillStill, float KillOnTgt,
     int RecoilSprays, float RecoilConsist, float RecoilPull, float RecoilRatio,
     int Revisits, int MaxPeekDepth, float FollowMs, float FollowSweep, int FollowTick,
-    float KillWallMax, int HeadN, int HeadSpike, float SpinMaxYaw, int SpinHits, int SpinHsKills, Dictionary<string, int> Signals)
+    float KillWallMax, int HeadN, int HeadSpike, float SpinMaxYaw, int SpinHits, int SpinHsKills,
+    int VisPolls, int ShellOn, int ShellDonut, int EscortN, float EscortMs, float EscortMaxMs,
+    int GainSilentN, float GainSilentSlope, float GainSilentCorr, float GainSilentDeg,
+    int GainAudN, float GainAudSlope, Dictionary<string, int> Signals)
 {
     public string Detail =>
         Signals.Count > 0 ? string.Join(", ", Signals.Select(kv => $"{kv.Key}×{kv.Value}")) : "no signals";
