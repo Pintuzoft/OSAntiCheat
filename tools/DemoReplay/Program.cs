@@ -785,6 +785,9 @@ static async Task<(List<PlayerResult> players, List<ShotRow> shots, List<KillRow
     const float SprayGapSeconds = 0.13f;
     const int MinSprayShots = 6;
     const int RecoilCurveLen = 8;
+    // Mirrors the live InfoAxesMinPlayers gate (config v23): below this many human team players
+    // the information sections (FAST/PRECOG) carry a small-lobby caution instead of review weight.
+    const int SmallLobbyPlayers = 6;
 
     // wallhack.revisit (the double-peek): per (observer, unspotted enemy), a small state machine that
     // fires when the aim goes ON-target -> OFF -> ON-target again within a window while the enemy stays
@@ -2165,6 +2168,11 @@ static async Task<(List<PlayerResult> players, List<ShotRow> shots, List<KillRow
         var preAimed = reactionRows.Count - genuine.Count;
         Console.WriteLine($"\n=== spotted->shot timing ({Path.GetFileName(file)}): {reactionRows.Count} decisions " +
                           $"({preAimed} pre-aimed <=3deg excluded from cloud) ===");
+        // Matches the live InfoAxesMinPlayers gate: two 3-player matches (2026-08-13) put every
+        // participant on FAST/PRECOG lines at once — with one or two enemies, pre-aim is expected.
+        if (names.Count < SmallLobbyPlayers)
+            Console.WriteLine($"  [SMALL LOBBY] only {names.Count} players — pre-aim on the few enemies is expected; " +
+                              "FAST/PRECOG lines below are context, not review flags");
         if (genuine.Count > 0)
         {
             var sorted = genuine.Select(r => r.ms).OrderBy(x => x).ToList();
@@ -2187,6 +2195,9 @@ static async Task<(List<PlayerResult> players, List<ShotRow> shots, List<KillRow
         var engaged = encounterRows.Where(r => r.LatencyMs >= 0f && r.ErrAtEdgeDeg > EncOnDeg).ToList();
         Console.WriteLine($"\n=== aim-onset vs visibility ({Path.GetFileName(file)}): {encounterRows.Count} edges, " +
                           $"{engaged.Count} engaged, {smokeGatedSamples} null-samples smoke-gated ===");
+        if (names.Count < SmallLobbyPlayers)
+            Console.WriteLine($"  [SMALL LOBBY] only {names.Count} players — pre-aim on the few enemies is expected; " +
+                              "FAST/PRECOG lines below are context, not review flags");
         if (engaged.Count > 0)
         {
             var lat = engaged.Select(r => r.LatencyMs).OrderBy(x => x).ToList();

@@ -14,7 +14,7 @@ public sealed class OSAntiCheatConfig : BasePluginConfig
     // a version bump — missing keys simply deserialize to the defaults below (so new detectors are
     // active even under a stale file). To get the file itself current: unload the plugin, move the
     // json away, load again — it regenerates at this version with every key present.
-    public override int Version { get; set; } = 22;
+    public override int Version { get; set; } = 23;
 
     /// <summary>
     /// Include bots as detection subjects. Bots have perfect server-driven aim so they trip the
@@ -477,4 +477,18 @@ public sealed class OSAntiCheatConfig : BasePluginConfig
     /// </summary>
     [JsonPropertyName("NullTestMinPopObservations")]
     public int NullTestMinPopObservations { get; set; } = 200;
+
+    /// <summary>
+    /// Minimum players on teams (bots counted only when IncludeBots) before the information axes
+    /// (wallhack.nulltest, aim.drift) sample at all. In small lobbies both legs of these tests are
+    /// structurally biased: with one or two enemies a regular's pre-aim knowledge is near-perfect
+    /// (audited 2026-08-13: two 3-player matches gave every participant nulltest z=5–7 live and
+    /// symmetric pre-visible convergences in replay), and the "rest of population" baseline is one
+    /// or two peers — too thin to mean anything even after it clears the observation floors.
+    /// Samples taken below this line are not just muted, they are never collected, so a lobby that
+    /// later grows starts its evidence clean. Weapon-axes (snap, recoil, killburst…) are untouched:
+    /// their physics does not change with lobby size.
+    /// </summary>
+    [JsonPropertyName("InfoAxesMinPlayers")]
+    public int InfoAxesMinPlayers { get; set; } = 6;
 }

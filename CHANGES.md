@@ -4,6 +4,25 @@ Version history for OSAntiCheat, newest first. Every release gets an entry here;
 describes the current state only. Player/admin names follow the pseudonym scheme from
 [TODO.md](TODO.md) (Cn = typed cheater, Gn = griefer, Rn = regular, An = admin).
 
+## v0.9.96 — small-lobby gate on the information axes
+
+Audit of a regular (2026-08-13, two 3-player matches) exposed a small-lobby artifact, cousin
+to the night-map one: with one or two enemies, pre-aim knowledge is near-perfect and the
+"rest of population" baseline is a couple of peers, so the information axes inflate for
+EVERYONE present — live nulltest hit z=5–7 on all participants while DemoReplay's harder
+axes stayed at zero, and the replay FAST/PRECOG sections flagged all three players
+symmetrically. Log-wide, nulltest was 87% of all signals and had flagged 101 unique players
+with near-identical profiles (top-15 median z ≈ 5) — population noise, not suspects.
+
+- New `InfoAxesMinPlayers` (default 6): below this many players on teams (bots counted only
+  with IncludeBots), wallhack.nulltest and aim.drift stop SAMPLING — not just emitting — so
+  small-lobby evidence never pollutes the per-map totals a later, fuller lobby is judged
+  against. Weapon axes are untouched: their physics doesn't change with lobby size.
+- DemoReplay: the spotted->shot and aim-onset sections print a `[SMALL LOBBY]` caution when
+  the demo has fewer than 6 human team players, so FAST/PRECOG lines read as context there.
+
+Config version 23. 105 tests.
+
 ## v0.9.95 — admin chat throttle (notices must never drown the chat)
 
 Owner: admins get spammed off the regular chat if every tier event pings. The engine re-raises

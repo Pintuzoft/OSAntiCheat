@@ -479,6 +479,19 @@ public sealed class OSAntiCheatPlugin : BasePlugin, IPluginConfig<OSAntiCheatCon
         float nullAimDeg = Config.NullTestAimDeg;
         bool roundStart = now - _roundStartTime < Config.WallhackRoundStartSeconds;
 
+        // Small-lobby gate for the information axes (nulltest, aim.drift): with one or two enemies
+        // pre-aim knowledge is near-perfect and the peer baseline is a couple of players, so both
+        // the player's own present-bias and the population-relative control are structurally
+        // biased. Below the line we don't sample at all — muting alone would let small-lobby
+        // evidence pollute the per-map totals for the rest of the map.
+        int lobbyPlayers = 0;
+        foreach (var p in Utilities.GetPlayers())
+        {
+            if (!p.IsValid || (p.IsBot && !Config.IncludeBots)) continue;
+            if (p.Team is CsTeam.Terrorist or CsTeam.CounterTerrorist) lobbyPlayers++;
+        }
+        bool infoAxes = lobbyPlayers >= Config.InfoAxesMinPlayers;
+
         foreach (var observer in Utilities.GetPlayers())
         {
             if (!observer.IsValid || !observer.PawnIsAlive) continue;
@@ -548,7 +561,7 @@ public sealed class OSAntiCheatPlugin : BasePlugin, IPluginConfig<OSAntiCheatCon
                 }
 
                 // Null test: only when we can place where this enemy was ~1.5s ago.
-                if (Config.EnableNullTest &&
+                if (Config.EnableNullTest && infoAxes &&
                     _tracking.For(enemy.Slot) is { } enemyTracker &&
                     TryPastOrigin(enemyTracker, now, nullLag, out var pastFeet))
                 {
@@ -590,9 +603,9 @@ public sealed class OSAntiCheatPlugin : BasePlugin, IPluginConfig<OSAntiCheatCon
             }
             if (Config.EnableWallhackGaze)
                 Report(_wallhackGaze, _wallhackGaze.Observe(slot, now, bestGaze));
-            if (Config.EnableNullTest)
+            if (Config.EnableNullTest && infoAxes)
                 Report(_nullTest, _nullTest.Accumulate(slot, now, ntNowOnly, ntPastOnly));
-            if (Config.EnableAimDrift && _tracking.For(slot) is { } obsTracker)
+            if (Config.EnableAimDrift && infoAxes && _tracking.For(slot) is { } obsTracker)
                 Report(_aimDrift, _aimDrift.Observe(obsTracker, EnemyTrackersOf(observer), now));
         }
     }
