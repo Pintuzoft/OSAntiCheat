@@ -381,15 +381,16 @@ public sealed class OSAntiCheatConfig : BasePluginConfig
     [JsonPropertyName("WallhackMinBearingRateDegPerSec")]
     public float WallhackMinBearingRateDegPerSec { get; set; } = 10f;
 
-    // Geometric gate (CS2FOW .bvh8 bakes; see docs/visibility-oracle.md). Off by default until
-    // live-validated. With no bake for the current map the gate simply doesn't apply — the
-    // detector falls back to spotted-only behaviour, never off.
+    // Geometric gate (CS2FOW .bvh8 bakes; see docs/visibility-oracle.md). On by default since
+    // v0.9.96+: live-validated across 27 maps (2026-08, bake-on-load held throughout). With no
+    // bake for the current map the gate simply doesn't apply — the detector falls back to
+    // spotted-only behaviour, never off.
 
     /// <summary>Require wallhack.track candidates to be provably occluded by static geometry AND
     /// unspotted by the observer's entire team. Measured (21 demos, 313 sessions): legit noise
     /// 65→15 sessions, best-sampled cheater kept at 4.3x the highest legit rate.</summary>
     [JsonPropertyName("WallhackGeoGate")]
-    public bool WallhackGeoGate { get; set; } = false;
+    public bool WallhackGeoGate { get; set; } = true;
 
     /// <summary>Directory holding <c>&lt;map&gt;.bvh8</c> bakes. Relative paths resolve against the
     /// plugin module directory; empty disables bake loading entirely.</summary>

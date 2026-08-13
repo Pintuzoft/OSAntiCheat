@@ -73,8 +73,39 @@ public sealed class OSAntiCheatPlugin : BasePlugin, IPluginConfig<OSAntiCheatCon
     private const float BurstWindowSeconds = 0.25f; // shots closer than this count as one burst
     private float _roundStartTime; // server time of the latest round start
 
+    // Config-overlay log lines buffered until Load — OnConfigParsed runs during plugin init and
+    // the Logger is not guaranteed to be wired yet.
+    private readonly List<(string Message, bool Warn)> _overlayNotes = new();
+
+    /// <summary>
+    /// Apply the server-local overlay (<c>OSAntiCheat.local.json</c> next to the generated
+    /// config) on top of the parsed config. Schema-bump regeneration rewrites the generated file
+    /// with defaults — the owner had to restart, re-pin BakesDir/GeoGate, and restart again every
+    /// release. The overlay file is never written by anything, so pinned keys survive: one
+    /// deploy, one restart. Any failure falls back to the generated config alone, loudly.
+    /// </summary>
+    private OSAntiCheatConfig ApplyLocalOverlay(OSAntiCheatConfig config)
+    {
+        try
+        {
+            string path = Path.GetFullPath(Path.Combine(
+                ModuleDirectory, "..", "..", "configs", "plugins", ModuleName, $"{ModuleName}.local.json"));
+            if (!File.Exists(path)) return config;
+            config = ConfigOverlay.Apply(config, File.ReadAllText(path), out var applied, out var unknown);
+            _overlayNotes.Add(($"config overlay {path}: applied [{string.Join(", ", applied)}]", false));
+            if (unknown.Length > 0)
+                _overlayNotes.Add(($"config overlay: UNKNOWN keys ignored [{string.Join(", ", unknown)}] — typo?", true));
+        }
+        catch (Exception ex)
+        {
+            _overlayNotes.Add(($"config overlay FAILED, running on the generated config alone: {ex.Message}", true));
+        }
+        return config;
+    }
+
     public void OnConfigParsed(OSAntiCheatConfig config)
     {
+        config = ApplyLocalOverlay(config);
         Config = config;
         _engine = new SuspicionEngine(new SuspicionConfig
         {
@@ -126,6 +157,12 @@ public sealed class OSAntiCheatPlugin : BasePlugin, IPluginConfig<OSAntiCheatCon
         if (!Path.IsPathRooted(logPath))
             logPath = Path.GetFullPath(Path.Combine(ModuleDirectory, "..", "..", "logs", Path.GetFileName(logPath)));
         _alerts = new AlertSink(Logger, logPath);
+        foreach (var (message, warn) in _overlayNotes)
+        {
+            if (warn) Logger.LogWarning("{Message}", message);
+            else Logger.LogInformation("{Message}", message);
+        }
+        _overlayNotes.Clear();
         _engine.TierRaised += OnTierRaised;
 
         // Map each detector to its response class so an alert can be labelled by the highest tier

@@ -4,6 +4,21 @@ Version history for OSAntiCheat, newest first. Every release gets an entry here;
 describes the current state only. Player/admin names follow the pseudonym scheme from
 [TODO.md](TODO.md) (Cn = typed cheater, Gn = griefer, Rn = regular, An = admin).
 
+## v0.9.97 — server-local config overlay (one deploy, one restart)
+
+Every schema bump regenerates the config with defaults, wiping this server's pinned values —
+so a release meant restart, re-edit BakesDir/GeoGate by hand, restart again. Two fixes:
+
+- **`OSAntiCheat.local.json`** next to the generated config: holds ONLY the keys the server
+  pins; applied on top of the parsed config at load. Nothing ever writes the file, so
+  regeneration can't touch it. Unknown keys are skipped and logged loudly (a typo must not
+  fail silently); `ConfigVersion` in the overlay is ignored; a malformed overlay logs an
+  error and the plugin runs on the generated config alone. Applied keys are logged at load.
+- **`WallhackGeoGate` now defaults to `true`** — the "off until live-validated" caveat is
+  spent: validated across 27 maps with bake-on-load holding throughout (2026-08).
+
+Config schema unchanged (v23). 110 tests.
+
 ## v0.9.96 — small-lobby gate on the information axes
 
 Audit of a regular (2026-08-13, two 3-player matches) exposed a small-lobby artifact, cousin
