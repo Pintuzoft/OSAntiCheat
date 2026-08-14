@@ -48,6 +48,16 @@ cp "$ROOT/LICENSE"   "$STAGE/" 2>/dev/null || true
 cp "$ROOT/tools/bake-maps.sh" "$STAGE/" 2>/dev/null || true
 chmod +x "$STAGE/bake-maps.sh" 2>/dev/null || true
 
+# Server-local overlay seed: if private/OSAntiCheat.local.json exists (gitignored, holds THIS
+# server's pinned keys), ship it inside the plugin folder. On first load the plugin copies it
+# to configs/plugins/OSAntiCheat/ if no local.json exists there yet — install + one restart,
+# nothing to hand-edit. NOTE: the seed ends up inside the zip; keep such a zip off public
+# release pages and build a clean one (move the file aside) for publishing.
+if [[ -f "$ROOT/private/$NAME.local.json" ]]; then
+  cp "$ROOT/private/$NAME.local.json" "$STAGE/"
+  echo "==> NOTE: server-local seed included ($NAME.local.json) — do not publish this zip"
+fi
+
 # Archive as OSAntiCheat_v<version>.zip. Prefer `zip`, fall back to Python's zipfile.
 ARCHIVE="$ROOT/dist/${NAME}_v${VERSION}.zip"
 if command -v zip >/dev/null 2>&1; then

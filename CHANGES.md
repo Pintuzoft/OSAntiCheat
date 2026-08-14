@@ -4,6 +4,19 @@ Version history for OSAntiCheat, newest first. Every release gets an entry here;
 describes the current state only. Player/admin names follow the pseudonym scheme from
 [TODO.md](TODO.md) (Cn = typed cheater, Gn = griefer, Rn = regular, An = admin).
 
+## v0.9.98 — overlay seed ships in the package (install + restart, nothing else)
+
+The owner packages releases so every plugin file is replaced but the config is left alone —
+so the one remaining manual step was creating `OSAntiCheat.local.json` in configs/ by hand.
+Now the package can carry it: `release.sh` ships `private/OSAntiCheat.local.json` (gitignored)
+inside the plugin folder when present, and on load the plugin copies it to
+`configs/plugins/OSAntiCheat/` — ONLY if no local.json exists there yet. Copy-once: a
+configs-side file always wins (it may be hand-edited), and later packages replacing the
+plugin-folder seed never touch it again. A seeded zip is for the server, not for public
+release pages — release.sh prints a loud note when the seed is included.
+
+Config schema unchanged (v23). 110 tests.
+
 ## v0.9.97 — server-local config overlay (one deploy, one restart)
 
 Every schema bump regenerates the config with defaults, wiping this server's pinned values —

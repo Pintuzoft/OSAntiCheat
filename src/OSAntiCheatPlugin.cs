@@ -90,7 +90,18 @@ public sealed class OSAntiCheatPlugin : BasePlugin, IPluginConfig<OSAntiCheatCon
         {
             string path = Path.GetFullPath(Path.Combine(
                 ModuleDirectory, "..", "..", "configs", "plugins", ModuleName, $"{ModuleName}.local.json"));
-            if (!File.Exists(path)) return config;
+            if (!File.Exists(path))
+            {
+                // Seed from the package: the release zip may carry the server's local.json inside
+                // the plugin folder. First load plants it in configs/ — install, restart, done.
+                // Copy-once only: an existing configs-side file always wins (it may be hand-edited),
+                // and later package updates replacing the plugin-folder seed never touch it again.
+                string seed = Path.Combine(ModuleDirectory, $"{ModuleName}.local.json");
+                if (!File.Exists(seed)) return config;
+                Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+                File.Copy(seed, path);
+                _overlayNotes.Add(($"config overlay seeded from package: {seed} -> {path}", false));
+            }
             config = ConfigOverlay.Apply(config, File.ReadAllText(path), out var applied, out var unknown);
             _overlayNotes.Add(($"config overlay {path}: applied [{string.Join(", ", applied)}]", false));
             if (unknown.Length > 0)
