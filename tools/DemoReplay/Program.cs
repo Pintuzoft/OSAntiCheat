@@ -246,7 +246,7 @@ if (shotsPath is not null)
     // switchMs/switchDeg are -1 when the shot stayed on the same target.
     // demo first: without it the file can't be deduped or resumed, and a half-finished run
     // silently doubles some players' shots.
-    if (freshShots) shotsCsv.WriteLine("demo,steamId,name,aimErrDeg,switchMs,switchDeg,onTargetMs,viewRateDegPerSec,burstStart,headErrDeg,tick,targetId,snapErrPrev,snapErrFire");
+    if (freshShots) shotsCsv.WriteLine("demo,steamId,name,aimErrDeg,switchMs,switchDeg,onTargetMs,viewRateDegPerSec,burstStart,headErrDeg,tick,targetId,snapErrPrev,snapErrFire,weapon,speedU,chainIdx,gapMs");
     shotsCsv.Flush();
 }
 
@@ -258,7 +258,7 @@ if (killsPath is not null)
     if (freshKills) killsCsv.WriteLine("demo,attackerId,attackerName,victimId,victimName,round,tick,weapon,headshot,dmg," +
         "stillDegS,onTgtDeg,sig,blindTicks,aliveTicks,teamSeenTicks,victimPathU,victimNetU,frozenMs,shotsInHold," +
         "sinceAttSawSec,sinceMateSawSec,distU,gatedSig,headErrFire,headErrPrev,headErrPrev2," +
-        "followMs,followSweptDeg,followDispU,followGapMs");
+        "followMs,followSweptDeg,followDispU,followGapMs,attSpeedU,attChainIdx,attGapMs");
     killsCsv.Flush();
 }
 
@@ -377,7 +377,9 @@ await Parallel.ForEachAsync(demoFiles, new ParallelOptions { MaxDegreeOfParallel
                         $"{sh.ViewRateDegPerSec.ToString("F0", CultureInfo.InvariantCulture)}," +
                         $"{sh.BurstStart}," +
                         $"{sh.HeadErrDeg.ToString("F3", CultureInfo.InvariantCulture)},{sh.Tick},{sh.TargetId}," +
-                        $"{sh.SnapErrPrev.ToString("F3", CultureInfo.InvariantCulture)},{sh.SnapErrFire.ToString("F3", CultureInfo.InvariantCulture)}");
+                        $"{sh.SnapErrPrev.ToString("F3", CultureInfo.InvariantCulture)},{sh.SnapErrFire.ToString("F3", CultureInfo.InvariantCulture)}," +
+                        $"{Csv(sh.Weapon)},{sh.SpeedU.ToString("F0", CultureInfo.InvariantCulture)},{sh.ChainIdx}," +
+                        $"{sh.GapMs.ToString("F0", CultureInfo.InvariantCulture)}");
                 foreach (var k in killRows)
                     killsCsv?.WriteLine($"{Csv(Path.GetFileName(file))},{k.AttackerId},{Csv(k.AttackerName)},{k.VictimId},{Csv(k.VictimName)}," +
                         $"{k.Round},{k.Tick},{Csv(k.Weapon)},{(k.Headshot ? 1 : 0)},{k.Dmg}," +
@@ -390,7 +392,9 @@ await Parallel.ForEachAsync(demoFiles, new ParallelOptions { MaxDegreeOfParallel
                         $"{k.HeadErrFire.ToString("F3", CultureInfo.InvariantCulture)},{k.HeadErrPrev.ToString("F3", CultureInfo.InvariantCulture)}," +
                         $"{k.HeadErrPrev2.ToString("F3", CultureInfo.InvariantCulture)}," +
                         $"{k.FollowMs.ToString("F0", CultureInfo.InvariantCulture)},{k.FollowSweptDeg.ToString("F0", CultureInfo.InvariantCulture)}," +
-                        $"{k.FollowDispU.ToString("F0", CultureInfo.InvariantCulture)},{k.FollowGapMs.ToString("F0", CultureInfo.InvariantCulture)}");
+                        $"{k.FollowDispU.ToString("F0", CultureInfo.InvariantCulture)},{k.FollowGapMs.ToString("F0", CultureInfo.InvariantCulture)}," +
+                        $"{k.AttSpeedU.ToString("F0", CultureInfo.InvariantCulture)},{k.AttChainIdx}," +
+                        $"{k.AttGapMs.ToString("F0", CultureInfo.InvariantCulture)}");
                 foreach (var h in hurtRows)
                     hurtsCsv?.WriteLine($"{Csv(Path.GetFileName(file))},{h.AttackerId},{Csv(h.AttackerName)},{h.VictimId}," +
                         $"{h.Round},{h.Tick},{Csv(h.Weapon)},{h.Dmg}," +
@@ -766,6 +770,8 @@ static async Task<(List<PlayerResult> players, List<ShotRow> shots, List<KillRow
     var lastFire = new Dictionary<int, float>();
     var prevShot = new Dictionary<int, (float time, int target, ViewAngles angles)>();
     var shots = new List<ShotRow>();
+    var shotChain = new Dictionary<int, int>();   // 1-based shot index within the current cyclic-rate chain
+    var lastShotStats = new Dictionary<int, (float speedU, int chainIdx, float gapMs)>(); // at the latest pull, for kill rows
 
     // Recoil-script signature (v0, raw measurement): an anti-recoil script's per-spray view-angle
     // compensation curve is near-identical spray to spray; a human's pull-down varies. Group sprays
@@ -1343,7 +1349,10 @@ static async Task<(List<PlayerResult> players, List<ShotRow> shots, List<KillRow
             pathLen, netDisp, frozenMs, shotsInHold, sinceAtt, sinceMate,
             Vector3.Distance(aShot, vShot), gatedSig,
             headErrFire, headErrPrev, headErrPrev2,
-            followMs, followSwept, followDisp, followGapMs));
+            followMs, followSwept, followDisp, followGapMs,
+            lastShotStats.GetValueOrDefault(aSlot, (speedU: -1f, chainIdx: 0, gapMs: -1f)).speedU,
+            lastShotStats.GetValueOrDefault(aSlot, (speedU: -1f, chainIdx: 0, gapMs: -1f)).chainIdx,
+            lastShotStats.GetValueOrDefault(aSlot, (speedU: -1f, chainIdx: 0, gapMs: -1f)).gapMs));
 
         // --revisit-detail <steamId>: dump this attacker's kills for human review.
         if (revisitTarget != 0 && att.SteamID == revisitTarget)
@@ -1412,15 +1421,34 @@ static async Task<(List<PlayerResult> players, List<ShotRow> shots, List<KillRow
 
         // Recoil-consistency: fold this shot into the current weapon-specific spray. A new weapon or
         // a gap > SprayGapSeconds closes the previous spray and starts a fresh one.
+        string weap = (e.Weapon ?? "").ToLowerInvariant();
+        float ts = Now();
         {
-            string weap = (e.Weapon ?? "").ToLowerInvariant();
-            float ts = Now();
             bool cont = sprayLastFire.TryGetValue(slot, out var slf) && ts - slf < SprayGapSeconds &&
                         sprayWeapon.GetValueOrDefault(slot) == weap;
             if (!cont) { FlushSpray(slot); sprayWeapon[slot] = weap; sprayCurve[slot] = new List<(float pitch, float yaw)>(); }
+            shotChain[slot] = cont ? shotChain.GetValueOrDefault(slot) + 1 : 1;
             sprayLastFire[slot] = ts;
             if (shooterTracker.TryLatest(out var sa)) sprayCurve[slot].Add((sa.Angles.Pitch, sa.Angles.Yaw));
         }
+
+        // Spray-vs-tap raw axes (owner's idea, 2026-08-13): horizontal speed at the trigger pull,
+        // the shot's index within its cyclic-rate chain, and the pause since the previous pull.
+        // The premise: machines optimize to exact boundaries — fire on the first accurate tick
+        // after a stop, re-burst at the exact recoil-reset time — while humans jitter around
+        // them. Raw columns only; thresholds get read off the labelled corpus, never guessed.
+        float speedU = -1f;
+        if (shooterTracker.Count >= 2)
+        {
+            var s0 = shooterTracker[0];
+            var s1 = shooterTracker[1];
+            float sdt = s0.Time - s1.Time;
+            if (sdt > 0f && s0.Sequence - s1.Sequence == 1 && s0.Alive && s1.Alive)
+                speedU = MathF.Sqrt((s0.Origin.X - s1.Origin.X) * (s0.Origin.X - s1.Origin.X) +
+                                    (s0.Origin.Y - s1.Origin.Y) * (s0.Origin.Y - s1.Origin.Y)) / sdt;
+        }
+        float gapMs = ftl.Count >= 2 ? (ts - ftl[^2]) * 1000f : -1f;
+        lastShotStats[slot] = (speedU, shotChain[slot], gapMs);
 
         var team = teams.GetValueOrDefault(slot);
         var enemies = trackers.Where(kv => kv.Key != slot &&
@@ -1588,7 +1616,8 @@ static async Task<(List<PlayerResult> players, List<ShotRow> shots, List<KillRow
             nearestErr, fromTarget >= 0 ? switchMs : -1f, fromTarget >= 0 ? switchDeg : -1f,
             onTargetMs, viewRate, burst ? 0 : 1, headErr,
             demo.CurrentDemoTick.Value, steamIds.GetValueOrDefault(nearestId),
-            snapErrPrev, snapErrFire));
+            snapErrPrev, snapErrFire,
+            weap, speedU, shotChain.GetValueOrDefault(slot), gapMs));
     };
 
     float lastPoll = float.NegativeInfinity;
@@ -2301,7 +2330,9 @@ internal sealed class GainAcc { public int N; public double Sx, Sy, Sxx, Sxy, Sy
 internal readonly record struct ShotRow(
     ulong SteamId, string Name, float AimErrDeg, float SwitchMs, float SwitchDeg, float OnTargetMs,
     float ViewRateDegPerSec, int BurstStart, float HeadErrDeg, int Tick, ulong TargetId,
-    float SnapErrPrev, float SnapErrFire);   // aimbot.snap: head-centre error one tick before / at the shot
+    float SnapErrPrev, float SnapErrFire,    // aimbot.snap: head-centre error one tick before / at the shot
+    string Weapon, float SpeedU, int ChainIdx, float GapMs); // spray-vs-tap axes: horizontal speed at the pull,
+                                                             // shot # in its cyclic-rate chain, pause since previous pull
 
 // Detector knobs, loaded from --config <json>. The tuned file is the future plugin config:
 // calibrated offline against known-legit players, ported verbatim to live. All thresholds sit on
@@ -2355,7 +2386,8 @@ internal readonly record struct KillRow(
     float VictimPathU, float VictimNetU, float FrozenMs, int ShotsInHold,
     float SinceAttSawSec, float SinceMateSawSec, float DistU, float GatedSig,
     float HeadErrFire, float HeadErrPrev, float HeadErrPrev2,    // aimbot.snap approach profile (N, N-1, N-2)
-    float FollowMs, float FollowSweptDeg, float FollowDispU, float FollowGapMs); // venn: wall-follow meeting this kill (-1 = none)
+    float FollowMs, float FollowSweptDeg, float FollowDispU, float FollowGapMs, // venn: wall-follow meeting this kill (-1 = none)
+    float AttSpeedU, int AttChainIdx, float AttGapMs); // spray-vs-tap axes at the killing pull (-1/0 = unknown)
 
 internal sealed record PlayerResult(
     string Demo, ulong SteamId, string Name, float PeakScore, float AliveMinutes,
