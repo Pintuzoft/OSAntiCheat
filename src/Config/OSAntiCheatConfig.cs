@@ -201,18 +201,19 @@ public sealed class OSAntiCheatConfig : BasePluginConfig
     /// <summary>
     /// Bunnyhop/strafe script (movement.airgain): horizontal speed gained WHILE AIRBORNE across a
     /// chain of jumps. The engine clamps takeoff speed but air-strafe physics after the clamp is
-    /// shared — a bot syncing strafe+yaw per tick pumps back ~50–100 u/s per hop (C9: +67 median,
-    /// honest corpus max +14 over 261 sessions). Surf is structurally excluded (a ramp ride is one
+    /// shared — a bot syncing strafe+yaw per tick pumps back ~50–100 u/s per hop (C9: +71 windowed median,
+    /// honest windowed max +21). Surf is structurally excluded (a ramp ride is one
     /// long airborne phase, not a chain of jump arcs). The stack's only movement axis — fully
     /// independent corroboration for the wall/aim cheats bhop ships with.
     /// </summary>
     [JsonPropertyName("EnableAirGain")]
     public bool EnableAirGain { get; set; } = true;
 
-    /// <summary>Chained arcs needed in the window before the axis says anything.</summary>
-    public int AirGainMinArcs { get; set; } = 4;
+    /// <summary>Chained arcs needed in the window before the axis says anything. Four-arc windows
+    /// reach +33.5 median honestly (one lucky downhill run); five-arc windows top out at +21.0.</summary>
+    public int AirGainMinArcs { get; set; } = 5;
 
-    /// <summary>Median air gain (u/s per hop) for the fusion whisper. Honest corpus max: 14.3.</summary>
+    /// <summary>Median air gain (u/s per hop) for the fusion whisper. Honest windowed max: 21.0.</summary>
     public float AirGainSignalMedianGain { get; set; } = 25f;
 
     /// <summary>Chained arcs needed for the auto-action edge (a downhill burst dies by hop three).</summary>

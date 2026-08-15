@@ -16,14 +16,17 @@ namespace OSAntiCheat.Detection.Detectors;
 /// (ramps are too steep to ground on) and fails both caps, so surfing is structurally invisible
 /// to this axis. Arcs count only when CHAINED (re-launch within ~0.2 s of landing at speed):
 /// isolated jumps, ledge walk-offs and HE boosts never build a chain, and the median across the
-/// chain shrugs off a single boosted outlier.
+/// chain shrugs off a single boosted outlier. The burst STARTER is promoted retroactively when
+/// the next hop chains onto it — a 4-hop burst counts 4 arcs, so short-burst scripts (C9 ran
+/// 3–4-hop chains) cannot slide under the arc minimum by keeping chains short.
 ///
-/// Corpus 43 demos / 261 honest sessions with ≥4 chained arcs (HopProbe 2026-08-15): median
-/// air gain per session max +14.3 u/s, p99 +13.8 (downhill hop bursts live here — stamina kills
-/// them by the third hop). C9: +67.3 median, 8/8 arcs ≥ +60. The edge gate (median ≥ +40 AND
+/// Corpus 43 demos (HopProbe v4 2026-08-15, launch floor 120, retro-chained, the same rolling
+/// statistic this detector evaluates): honest max windowed 5-arc median +21.0 u/s across 124
+/// sessions (4-arc windows reach 33.5 — why the window minimum is five). C9: 6 chained arcs,
+/// windowed median +71.1, every single jump gaining +67…+150. The edge gate (median ≥ +40 AND
 /// median peak ≥ 300 u/s over ≥5 chained arcs) sits ~3× above the honest maximum ever measured
 /// and additionally demands sustained over-sprint speed — beyond-human on both counts, so the
-/// edge is auto-action material (the freeze response). The whisper gate (median ≥ +25 over ≥4)
+/// edge is auto-action material (the freeze response). The whisper gate (median ≥ +25 over ≥5)
 /// feeds fusion: bhop ships in the same rage packages as wall/aim, and this is the stack's only
 /// movement axis — fully independent corroboration.
 ///
@@ -42,7 +45,7 @@ public sealed class MovementAirGainDetector : IDetector
     private const float MaxArcRise = 120f;              // z-span beyond a jump arc = ramp/drop
     private const float MinLaunchVz = 50f;              // upward launch = a jump; falls start downward
     private const int ChainMaxTicks = 14;               // re-launch within ~0.22 s of landing = chained
-    private const float MinLaunchSpeed = 180f;          // slow-walk chains gain nothing worth measuring
+    private const float MinLaunchSpeed = 120f;          // the takeoff clamp parks cheaters near ~180 — the floor must sit well below it
     private const float TeleportSpeed = 450f;           // beyond legal move speed = respawn/teleport, void the arc
     private const float WindowSeconds = 90f;
     private const float CooldownSeconds = 20f;
@@ -65,6 +68,7 @@ public sealed class MovementAirGainDetector : IDetector
         public float ZMin, ZMax;
         public int AirTicks;
         public int GroundTicksSinceLand = int.MaxValue / 2;
+        public (float Time, float Gain, float Peak)? PendingStarter;
         public readonly List<(float Time, float Gain, float Peak)> Arcs = new();
         public float LastSignal = float.NegativeInfinity;
     }
@@ -72,7 +76,7 @@ public sealed class MovementAirGainDetector : IDetector
     private readonly Dictionary<int, SlotState> _slots = new();
 
     public MovementAirGainDetector(
-        int minArcs = 4, float signalMedianGain = 25f,
+        int minArcs = 5, float signalMedianGain = 25f,
         int edgeMinArcs = 5, float edgeMedianGain = 40f, float edgeMinPeakSpeed = 300f)
     {
         _minArcs = Math.Max(2, minArcs);
@@ -154,12 +158,25 @@ public sealed class MovementAirGainDetector : IDetector
 
             // Landed: close the arc.
             float dur = st.AirTicks / TickRate;
-            if (st.Valid && st.Chained
+            bool shapeOk = st.Valid
                 && dur >= MinArcSeconds && dur <= MaxArcSeconds
-                && st.ZMax - st.ZMin <= MaxArcRise)
+                && st.ZMax - st.ZMin <= MaxArcRise;
+            if (shapeOk && st.Chained)
             {
+                // The burst STARTER belongs to the chain: hop 1 has no landing behind it, but the
+                // moment hop 2 chains onto it, both are the same scripted run — a 4-hop burst must
+                // count 4 arcs, or short-burst scripts slide under the arc minimum.
+                if (st.PendingStarter is { } starter) st.Arcs.Add(starter);
+                st.PendingStarter = null;
                 st.Arcs.Add((now, st.PeakSpeed - st.LaunchSpeed, st.PeakSpeed));
             }
+            else if (shapeOk && st.LaunchSpeed >= MinLaunchSpeed)
+            {
+                // A lone jump-shaped arc at speed: kept pending; joins the window only if the
+                // next hop chains onto it, otherwise the next starter replaces it.
+                st.PendingStarter = (now, st.PeakSpeed - st.LaunchSpeed, st.PeakSpeed);
+            }
+            else st.PendingStarter = null;
             st.InAir = false;
             st.GroundTicksSinceLand = 0;
 

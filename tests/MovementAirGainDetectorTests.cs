@@ -100,6 +100,51 @@ public class MovementAirGainDetectorTests
     }
 
     [Fact]
+    public void Two_short_bursts_reach_the_edge()
+    {
+        // C9's live pattern: 3–4-hop bursts, big gains. Retro-chaining counts the burst starter,
+        // so two 3-hop bursts inside the window = 6 arcs — the edge cannot be dodged by keeping
+        // chains short.
+        var d = new MovementAirGainDetector();
+        var tr = new PlayerTracker(8192, slot: 1);
+        FeedGround(tr, 20, 250f);
+        Signal? sig = null;
+        float t = 0;
+        for (int burst = 0; burst < 2; burst++)
+        {
+            for (int hop = 0; hop < 3; hop++)
+            {
+                t = FeedHop(tr, 300f, 80f);
+                t = FeedGround(tr, 4, 300f);
+                sig = Drain(d, tr, t) ?? sig;
+            }
+            t = FeedGround(tr, 40, 280f);        // ~0.6 s run between bursts — chain broken, window not
+            sig = Drain(d, tr, t) ?? sig;
+        }
+        Assert.NotNull(sig);
+        Assert.Equal("airgain-chain", sig!.Value.Edge);
+    }
+
+    [Fact]
+    public void One_short_burst_stays_silent()
+    {
+        // A single 4-hop burst = 4 arcs: below the five-arc window minimum (honest 4-arc windows
+        // reach +33.5 median — one lucky downhill run — so four arcs alone prove nothing).
+        var d = new MovementAirGainDetector();
+        var tr = new PlayerTracker(8192, slot: 1);
+        FeedGround(tr, 20, 250f);
+        Signal? sig = null;
+        float t = 0;
+        for (int hop = 0; hop < 4; hop++)
+        {
+            t = FeedHop(tr, 300f, 80f);
+            t = FeedGround(tr, 4, 300f);
+            sig = Drain(d, tr, t) ?? sig;
+        }
+        Assert.Null(sig);
+    }
+
+    [Fact]
     public void Hop_spam_at_constant_speed_stays_silent()
     {
         // Jumping constantly is not the crime — gaining speed in the air is. A dozen chained

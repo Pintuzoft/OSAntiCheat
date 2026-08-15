@@ -4,6 +4,31 @@ Version history for OSAntiCheat, newest first. Every release gets an entry here;
 describes the current state only. Player/admin names follow the pseudonym scheme from
 [TODO.md](TODO.md) (Cn = typed cheater, Gn = griefer, Rn = regular, An = admin).
 
+## v0.9.101 — airgain recalibrated on the rolling-window statistic (and the clamp trap)
+
+Post-release calibration against the corpus using the EXACT statistic the live detector
+evaluates (rolling window, retro-chained burst starters) instead of whole-session medians,
+plus a per-hop audit of C9's session. Three fixes fell out:
+
+- **The takeoff clamp was eating the cheater's evidence.** `sv_enablebunnyhopping 0` resets a
+  bhopper to ~180 u/s at every takeoff — exactly the detector's old 180 u/s launch floor, which
+  silently disqualified half of C9's arcs. Floor lowered to 120: the gain median and the
+  over-sprint peak gate carry the discrimination, the floor only filters standstill hop spam.
+- **Burst starters count retroactively** (from v0.9.100's follow-up): hop 1 of a chain joins the
+  window the moment hop 2 chains onto it, so 3–4-hop burst scripts (C9's live pattern: EVERY
+  jump gained +67…+150 u/s, one from a 43 u/s standstill to 193) cannot duck the arc minimum.
+- **The whisper moves to the five-arc window.** Honest 4-arc windows reach +33.5 median (one
+  lucky downhill run); five-arc windows top out at +21.0 across 124 sessions. AirGainMinArcs
+  default 4 → 5; a lone 4-hop burst now proves nothing, two bursts inside 90 s still convict.
+  C9 under the final statistic: windowed median +71.1 — 3.4× the honest maximum.
+
+Also measured and REJECTED: the landing-to-rejump timing axis (script = zero variance). Demo
+z-inference cannot resolve the gap (every corpus session reads ~1 tick, honest and cheater
+alike) — parked until it can be measured live from real OnGround flags, not shipped unvalidated.
+
+Config schema unchanged (v24; only the AirGainMinArcs default changed — a config file already
+generated at v24 keeps its stored 4, set it to 5 by hand or regenerate). 121 tests.
+
 ## v0.9.100 — movement.airgain: the bunnyhop-script detector, with a mid-air freeze
 
 C9 bunnyhopped straight through a correctly configured server: `sv_autobunnyhopping 0` only
