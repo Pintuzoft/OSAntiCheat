@@ -4,6 +4,16 @@ Version history for OSAntiCheat, newest first. Every release gets an entry here;
 describes the current state only. Player/admin names follow the pseudonym scheme from
 [TODO.md](TODO.md) (Cn = typed cheater, Gn = griefer, Rn = regular, An = admin).
 
+## v0.9.104 — the frozen cheat is disarmed
+
+Second finding from the owner's self-freeze drill: MOVETYPE_NONE stops movement, not
+weapons — the statue could still shoot (he plinked a bot from mid-air to prove it), and a
+frozen wall+aim package sniping for the rest of the round is a punishment in name only.
+The freeze now strips all weapons as it lands. The statue is harmless, admins keep the
+evidence pair, and the next respawn re-equips as normal.
+
+Config schema unchanged (v24). 121 tests.
+
 ## v0.9.103 — the action notice says what actually happened
 
 The owner froze himself testing the airgain chain (thresholds lowered via overlay,

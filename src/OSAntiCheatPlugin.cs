@@ -494,6 +494,11 @@ public sealed class OSAntiCheatPlugin : BasePlugin, IPluginConfig<OSAntiCheatCon
         Schema.SetSchemaValue(pawn.Handle, "CBaseEntity", "m_nActualMoveType", (int)MoveType_t.MOVETYPE_NONE);
         Utilities.SetStateChanged(pawn, "CBaseEntity", "m_MoveType");
 
+        // MOVETYPE_NONE stops movement, not weapons — a frozen wall+aim package could keep
+        // shooting from the air (owner froze himself and shot a bot to prove it). Disarm too:
+        // the statue is harmless, and the next respawn re-equips as normal.
+        player.RemoveWeapons();
+
         if (seconds < 0f) return true;   // rest of round: the respawn thaws, nothing to schedule
 
         int slot = player.Slot;
