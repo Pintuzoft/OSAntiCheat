@@ -10,10 +10,11 @@ namespace OSAntiCheat.Config;
 /// </summary>
 public sealed class OSAntiCheatConfig : BasePluginConfig
 {
-    // Bump when adding fields. NOTE: CounterStrikeSharp does NOT rewrite an existing config file on
-    // a version bump — missing keys simply deserialize to the defaults below (so new detectors are
-    // active even under a stale file). To get the file itself current: unload the plugin, move the
-    // json away, load again — it regenerates at this version with every key present.
+    // Bump when adding fields. WARNING (observed live, v23→v24 2026-08-15 04:46): CounterStrikeSharp
+    // DOES rewrite the config file on a version bump — every hand-edited value resets to the defaults
+    // below. Pinned server values must therefore live in OSAntiCheat.local.json (the overlay, v0.9.97),
+    // which regeneration never touches. After any schema-bump release: verify the overlay file exists
+    // and that the load log shows its keys applied.
     public override int Version { get; set; } = 24;
 
     /// <summary>
