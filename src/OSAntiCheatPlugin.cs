@@ -463,13 +463,9 @@ public sealed class OSAntiCheatPlugin : BasePlugin, IPluginConfig<OSAntiCheatCon
         string line2 =
             $" {ChatColors.Red}[OSAC]{ChatColors.Default} evidence: {signal.Reason}";
 
-        foreach (var admin in Utilities.GetPlayers())
-        {
-            if (!admin.IsValid || admin.IsBot) continue;
-            if (!AdminManager.PlayerHasPermissions(admin, Config.AdminChatFlag)) continue;
-            admin.PrintToChat(line1);
-            admin.PrintToChat(line2);
-        }
+        var recipients = DeliverToAdmins(line1, line2);
+        _alerts?.LogNotify("action", [StripChatColors(line1), StripChatColors(line2)], recipients,
+            suspect.PlayerName, suspect.SteamID.ToString(), Server.MapName);
     }
 
     private void PollSpinbot()
@@ -823,7 +819,8 @@ public sealed class OSAntiCheatPlugin : BasePlugin, IPluginConfig<OSAntiCheatCon
             ? DetectorKind.LogicBreach : DetectorKind.Behavioural;
 
         // Always log (JSON-lines + console) — the durable record.
-        _alerts?.Handle(alert, player?.PlayerName, player?.SteamID.ToString(), responseClass);
+        _alerts?.Handle(alert, player?.PlayerName, player?.SteamID.ToString(), responseClass,
+            Server.MapName);
 
         // Additionally ping online admins in chat so they don't have to read logs — throttled so
         // a hovering score or a broadly-firing axis can never drown the chat (once per player per
@@ -876,11 +873,25 @@ public sealed class OSAntiCheatPlugin : BasePlugin, IPluginConfig<OSAntiCheatCon
             $" {ChatColors.Red}[OSAC]{ChatColors.Default} {labelColor}{label}{ChatColors.Default} " +
             $"{ChatColors.Green}{name}{ChatColors.Default}: {hints}{caveat}";
 
+        var recipients = DeliverToAdmins(message);
+        _alerts?.LogNotify("suspicion", [StripChatColors(message)], recipients,
+            subject?.PlayerName, subject?.SteamID.ToString(), Server.MapName);
+    }
+
+    /// <summary>Send chat lines to every online admin holding AdminChatFlag; returns who got them.</summary>
+    private List<(string Name, string SteamId)> DeliverToAdmins(params string[] lines)
+    {
+        var recipients = new List<(string Name, string SteamId)>();
         foreach (var admin in Utilities.GetPlayers())
         {
             if (!admin.IsValid || admin.IsBot) continue;
             if (!AdminManager.PlayerHasPermissions(admin, Config.AdminChatFlag)) continue;
-            admin.PrintToChat(message);
+            foreach (var line in lines) admin.PrintToChat(line);
+            recipients.Add((admin.PlayerName ?? "?", admin.SteamID.ToString()));
         }
+        return recipients;
     }
+
+    /// <summary>Chat colour codes are control characters — strip them so logged payloads read clean.</summary>
+    private static string StripChatColors(string s) => new(s.Where(c => c >= ' ').ToArray());
 }

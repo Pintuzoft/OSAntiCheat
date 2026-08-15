@@ -4,6 +4,24 @@ Version history for OSAntiCheat, newest first. Every release gets an entry here;
 describes the current state only. Player/admin names follow the pseudonym scheme from
 [TODO.md](TODO.md) (Cn = typed cheater, Gn = griefer, Rn = regular, An = admin).
 
+## v0.9.99 — admin-chat deliveries are logged (what was sent, and to whom)
+
+C9's live Watch alert proved the pipeline end-to-end (signal → fusion → red admin notice →
+human kick-ban 10 s later) — and exposed a blind spot while reconstructing it: private
+`PrintToChat` lines reach only the clients they're addressed to. They are not in the GOTV
+demo (targeted usermessages never reach the broadcast), not in the server chat log, and the
+plugin didn't record sending them. "Did any admin actually see it?" had no answer in any log.
+
+Now every admin-chat delivery — both the throttled Watch/Review suspicion notice and the
+unconditional auto-action evidence pair — is logged at the moment of sending: a `notify`
+JSON-line (kind, subject, exact payload with colour codes stripped, recipient count, and
+each recipient's name + SteamID) plus a console line. `admins: 0` with an empty list is the
+record that matters most: the notice fired into an empty room, check the console log instead.
+Alert records also gain `wallClock` and `map` (signals always had them; alerts had to be
+dated by their neighbouring lines during the C9 reconstruction).
+
+Config schema unchanged (v23). 110 tests.
+
 ## v0.9.98 — overlay seed ships in the package (install + restart, nothing else)
 
 The owner packages releases so every plugin file is replaced but the config is left alone —

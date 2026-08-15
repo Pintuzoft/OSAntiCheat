@@ -77,8 +77,43 @@ public sealed class AlertSink
         }
     }
 
+    /// <summary>
+    /// Append one admin-chat delivery: the exact lines that went out and every admin who got
+    /// them, so "did anyone actually see it?" is answerable from the log alone. admins=0 with
+    /// an empty recipient list is the important record: the notice fired into an empty room.
+    /// </summary>
+    public void LogNotify(string kind, IReadOnlyList<string> lines,
+        IReadOnlyList<(string Name, string SteamId)> recipients,
+        string? subjectName, string? subjectSteamId, string? map = null)
+    {
+        var record = new
+        {
+            type = "notify",
+            wallClock = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss"),
+            map,
+            kind,                 // "suspicion" (Watch/Review notice) or "action" (kick evidence)
+            subject = subjectName,
+            subjectSteamId,
+            admins = recipients.Count,
+            recipients = recipients.Select(r => new { name = r.Name, steamId = r.SteamId }),
+            lines,                // exact chat payload, colour codes stripped
+        };
+
+        string json = JsonSerializer.Serialize(record);
+        lock (_gate)
+        {
+            File.AppendAllText(_path, json + Environment.NewLine);
+        }
+
+        _logger.LogInformation(
+            "[OSAC] admin notice ({Kind}) re {Subject} sent to {Count} admin(s) [{Admins}] :: {Lines}",
+            kind, subjectName ?? "?", recipients.Count,
+            string.Join(", ", recipients.Select(r => r.Name)),
+            string.Join(" | ", lines));
+    }
+
     public void Handle(SuspicionAlert alert, string? playerName, string? steamId,
-        DetectorKind responseClass = DetectorKind.Behavioural)
+        DetectorKind responseClass = DetectorKind.Behavioural, string? map = null)
     {
         // The owner's two tiers: a LogicBreach contribution means "beyond human" (auto-eligible);
         // otherwise it's a review flag ("improbable, a human could have — worth a look").
@@ -89,6 +124,8 @@ public sealed class AlertSink
         var record = new
         {
             type = "alert",
+            wallClock = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss"), // signals carry this; alerts lacked it and had to be dated via neighbouring lines
+            map,
             time = alert.Time,
             tier = alert.Tier.ToString(),
             responseClass = responseClass.ToString(),
