@@ -15,7 +15,7 @@ public sealed class OSAntiCheatConfig : BasePluginConfig
     // below. Pinned server values must therefore live in OSAntiCheat.local.json (the overlay, v0.9.97),
     // which regeneration never touches. After any schema-bump release: verify the overlay file exists
     // and that the load log shows its keys applied.
-    public override int Version { get; set; } = 24;
+    public override int Version { get; set; } = 25;
 
     /// <summary>
     /// Include bots as detection subjects. Bots have perfect server-driven aim so they trip the
@@ -227,10 +227,19 @@ public sealed class OSAntiCheatConfig : BasePluginConfig
     public float AirGainEdgeMinPeakSpeed { get; set; } = 300f;
 
     /// <summary>
-    /// Freeze response for the airgain edge: the pawn freezes IN PLACE (mid-air included).
-    /// Negative = REST OF THE ROUND (default; the next respawn thaws — and until then the frozen
-    /// cheat is a free target). Positive = that many seconds, then thaw. 0 disables the freeze —
-    /// the edge then goes through the generic <see cref="AutoActionCommand"/> path instead
+    /// Arm the freeze response. False (default) = LATENT: the edge still fires, fuses, alerts red
+    /// and hands admins the evidence pair + SteamID, and the action log records the DRY-RUN — but
+    /// nobody actually freezes. Same ladder the kick edges climbed (they shipped dry-run too, v0.9.8):
+    /// let the first REAL bhop script walk into the trap, verify the would-have-frozen record is
+    /// clean, then arm. Regular folk must never be the test.
+    /// </summary>
+    public bool AirGainFreezeArmed { get; set; } = false;
+
+    /// <summary>
+    /// Freeze response for the airgain edge: the pawn freezes IN PLACE (mid-air included) and is
+    /// disarmed. Negative = REST OF THE ROUND (default; the next respawn thaws — and until then the
+    /// frozen cheat is a free target). Positive = that many seconds, then thaw. 0 disables the
+    /// freeze — the edge then goes through the generic <see cref="AutoActionCommand"/> path instead
     /// (requires "airgain-chain" in <see cref="AutoActionEdges"/>).
     /// </summary>
     public float AirGainFreezeSeconds { get; set; } = -1f;

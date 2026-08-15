@@ -4,6 +4,18 @@ Version history for OSAntiCheat, newest first. Every release gets an entry here;
 describes the current state only. Player/admin names follow the pseudonym scheme from
 [TODO.md](TODO.md) (Cn = typed cheater, Gn = griefer, Rn = regular, An = admin).
 
+## v0.9.106 — the freeze goes latent until a real cheater validates it
+
+Owner's call, and the ladder's own rule applied to our newest edge: regular folk must never
+be the test. New `AirGainFreezeArmed` (default false): the airgain edge still fires, fuses,
+alerts red and hands admins the evidence pair + SteamID, and the action log records the
+DRY-RUN ("CHEAT CONFIRMED (dry-run, NOT frozen)") — but nobody actually freezes. When the
+first REAL bhop script walks into the trap and the would-have-frozen record reads clean,
+flip the flag in the overlay and the statue business opens. Exactly how the kick edges
+climbed (they shipped dry-run too, armed in v0.9.8 after validation).
+
+Config schema v24 → v25 (one new key, defaulted). 121 tests.
+
 ## v0.9.105 — the speeding ticket
 
 The freeze announce gets the owner's voice: " [OSAC] SPEEDING TICKET: {name} — impossible

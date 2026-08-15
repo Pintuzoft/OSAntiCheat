@@ -429,7 +429,8 @@ public sealed class OSAntiCheatPlugin : BasePlugin, IPluginConfig<OSAntiCheatCon
             // then the frozen cheat is a free target). Audited like any other auto-action.
             string span = Config.AirGainFreezeSeconds < 0f
                 ? "rest of round" : $"{Config.AirGainFreezeSeconds:F0}s";
-            bool froze = Config.AutoActionEnabled && TryFreeze(suspect, Config.AirGainFreezeSeconds);
+            bool froze = Config.AutoActionEnabled && Config.AirGainFreezeArmed
+                && TryFreeze(suspect, Config.AirGainFreezeSeconds);
             _alerts?.LogAction(signal, edge,
                 froze ? $"freeze-in-place ({span})" : $"DRY-RUN: freeze-in-place ({span})",
                 suspect.PlayerName, suspect.SteamID.ToString(), Server.MapName);
