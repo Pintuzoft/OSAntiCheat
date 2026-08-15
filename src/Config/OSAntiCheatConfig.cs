@@ -14,7 +14,7 @@ public sealed class OSAntiCheatConfig : BasePluginConfig
     // a version bump — missing keys simply deserialize to the defaults below (so new detectors are
     // active even under a stale file). To get the file itself current: unload the plugin, move the
     // json away, load again — it regenerates at this version with every key present.
-    public override int Version { get; set; } = 23;
+    public override int Version { get; set; } = 24;
 
     /// <summary>
     /// Include bots as detection subjects. Bots have perfect server-driven aim so they trip the
@@ -197,6 +197,43 @@ public sealed class OSAntiCheatConfig : BasePluginConfig
 
     /// <summary>Consecutive sign-alternations required. Honest max measured: 1.</summary>
     public int AntiAimJitterFlips { get; set; } = 6;
+
+    /// <summary>
+    /// Bunnyhop/strafe script (movement.airgain): horizontal speed gained WHILE AIRBORNE across a
+    /// chain of jumps. The engine clamps takeoff speed but air-strafe physics after the clamp is
+    /// shared — a bot syncing strafe+yaw per tick pumps back ~50–100 u/s per hop (C9: +67 median,
+    /// honest corpus max +14 over 261 sessions). Surf is structurally excluded (a ramp ride is one
+    /// long airborne phase, not a chain of jump arcs). The stack's only movement axis — fully
+    /// independent corroboration for the wall/aim cheats bhop ships with.
+    /// </summary>
+    [JsonPropertyName("EnableAirGain")]
+    public bool EnableAirGain { get; set; } = true;
+
+    /// <summary>Chained arcs needed in the window before the axis says anything.</summary>
+    public int AirGainMinArcs { get; set; } = 4;
+
+    /// <summary>Median air gain (u/s per hop) for the fusion whisper. Honest corpus max: 14.3.</summary>
+    public float AirGainSignalMedianGain { get; set; } = 25f;
+
+    /// <summary>Chained arcs needed for the auto-action edge (a downhill burst dies by hop three).</summary>
+    public int AirGainEdgeMinArcs { get; set; } = 5;
+
+    /// <summary>Median air gain (u/s per hop) for the edge — ~3× the honest maximum ever measured.</summary>
+    public float AirGainEdgeMedianGain { get; set; } = 40f;
+
+    /// <summary>Median per-arc peak speed (u/s) the edge also demands. Sprint cap is 250.</summary>
+    public float AirGainEdgeMinPeakSpeed { get; set; } = 300f;
+
+    /// <summary>
+    /// Freeze response for the airgain edge: the pawn freezes IN PLACE (mid-air included) for this
+    /// many seconds, then thaws. 0 disables the freeze — the edge then goes through the generic
+    /// <see cref="AutoActionCommand"/> path instead (requires "airgain-chain" in <see cref="AutoActionEdges"/>).
+    /// </summary>
+    public float AirGainFreezeSeconds { get; set; } = 10f;
+
+    /// <summary>Public chat line when the freeze lands. Placeholders: {name} {steamid} {detector}. Empty = silent.</summary>
+    public string AirGainFreezeAnnounce { get; set; } =
+        " [OSAC] {name} frozen mid-air — movement input beyond human (bunnyhop script)";
 
     /// <summary>
     /// Aimbot snap (pull-to-head): ≥ SnapOffFloorDeg off a head one tick before the shot →

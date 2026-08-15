@@ -4,6 +4,35 @@ Version history for OSAntiCheat, newest first. Every release gets an entry here;
 describes the current state only. Player/admin names follow the pseudonym scheme from
 [TODO.md](TODO.md) (Cn = typed cheater, Gn = griefer, Rn = regular, An = admin).
 
+## v0.9.100 — movement.airgain: the bunnyhop-script detector, with a mid-air freeze
+
+C9 bunnyhopped straight through a correctly configured server: `sv_autobunnyhopping 0` only
+demands frame-perfect re-jumps (trivial for a script) and `sv_enablebunnyhopping 0` clamps
+speed at takeoff — but air-strafe acceleration AFTER the clamp is shared physics, and his bot
+pumped back ~100 u/s per hop (clamp-capped launch ~300, landing ~400, hop after hop). The
+owner had told players and admins bhop was closed; it is — for humans.
+
+`movement.airgain` is the stack's first movement axis (LogicBreach): horizontal speed gained
+WHILE AIRBORNE, median across CHAINED jump arcs. An arc must be shaped like a jump — upward
+launch, 0.3–1.2 s airborne, ≤120 u z-span, re-launch within ~0.2 s of landing at speed — so a
+surf ride (one long airborne phase; ramps never ground you) and a walked-off ledge are
+structurally invisible, and a lone HE-boost can't move a median. Corpus baseline, 43 demos /
+261 honest sessions with ≥4 chained arcs: median gain max +14.3 u/s (downhill bursts live
+there — stamina kills them by hop three). C9: +67.3, 8/8 arcs ≥ +60.
+
+Whisper (fusion) at median ≥ +25 over ≥4 arcs. The auto-action edge `airgain-chain` demands
+median ≥ +40 (≈3× the honest maximum ever measured) AND median peak ≥ 300 u/s (over-sprint)
+over ≥5 chained arcs — and its response is new: the pawn FREEZES IN PLACE for
+`AirGainFreezeSeconds` (default 10 s; MOVETYPE_NONE stops gravity too, so a mid-chain catch
+hangs the cheater in the air), then thaws. The freeze needs no `AutoActionEdges` entry, is
+gated by `AutoActionEnabled` like every auto-action, and is fully audited (action log line,
+admin evidence pair, public announce template `AirGainFreezeAnnounce`). The edge bypasses the
+whisper cooldown — a whisper two hops earlier must not delay the freeze on a live script.
+
+Config schema v23 → v24 (new keys: EnableAirGain, AirGainMinArcs, AirGainSignalMedianGain,
+AirGainEdgeMinArcs, AirGainEdgeMedianGain, AirGainEdgeMinPeakSpeed, AirGainFreezeSeconds,
+AirGainFreezeAnnounce — all defaulted, existing values untouched). 118 tests.
+
 ## v0.9.99 — admin-chat deliveries are logged (what was sent, and to whom)
 
 C9's live Watch alert proved the pipeline end-to-end (signal → fusion → red admin notice →

@@ -3,6 +3,7 @@ using CounterStrikeSharp.API;
 using CounterStrikeSharp.API.Core;
 using CounterStrikeSharp.API.Modules.Admin;
 using CounterStrikeSharp.API.Modules.Commands;
+using CounterStrikeSharp.API.Modules.Memory;
 using CounterStrikeSharp.API.Modules.Timers;
 using CounterStrikeSharp.API.Modules.Utils;
 using Microsoft.Extensions.Logging;
@@ -49,6 +50,7 @@ public sealed class OSAntiCheatPlugin : BasePlugin, IPluginConfig<OSAntiCheatCon
     private RecoilDetector _recoil = new();
     private SilentAimDetector _silent = new();
     private AntiAimDetector _antiAim = new();
+    private MovementAirGainDetector _airGain = new();
     private SnapDetector _snap = new();
     private NameChangeDetector _nameChange = new();
     private WallhackDetector _wallhack = new();
@@ -137,6 +139,9 @@ public sealed class OSAntiCheatPlugin : BasePlugin, IPluginConfig<OSAntiCheatCon
         _recoil = new RecoilDetector(config.RecoilMaxRatio, config.RecoilMinSprays);
         _silent = new SilentAimDetector(config.SilentAimOffDeg, config.SilentAimMinHits);
         _antiAim = new AntiAimDetector(config.AntiAimPitchDeg, config.AntiAimJitterDeg, config.AntiAimJitterFlips);
+        _airGain = new MovementAirGainDetector(
+            config.AirGainMinArcs, config.AirGainSignalMedianGain,
+            config.AirGainEdgeMinArcs, config.AirGainEdgeMedianGain, config.AirGainEdgeMinPeakSpeed);
         _snap = new SnapDetector(config.SnapExactDeg, config.SnapOffFloorDeg, config.SnapMinSnaps);
         _nameChange = new NameChangeDetector(config.NameChangeMinChanges, config.NameChangeWindowSeconds);
         _wallhack = new WallhackDetector(
@@ -179,7 +184,7 @@ public sealed class OSAntiCheatPlugin : BasePlugin, IPluginConfig<OSAntiCheatCon
         // Map each detector to its response class so an alert can be labelled by the highest tier
         // that contributed (a LogicBreach signal makes the whole alert "beyond human").
         foreach (IDetector d in new IDetector[]
-                 { _aimbot, _triggerbot, _spinbot, _boneLock, _recoil, _silent, _antiAim, _snap, _nameChange, _wallhack, _wallhackGaze, _nullTest, _killBurst, _aimDrift })
+                 { _aimbot, _triggerbot, _spinbot, _boneLock, _recoil, _silent, _antiAim, _airGain, _snap, _nameChange, _wallhack, _wallhackGaze, _nullTest, _killBurst, _aimDrift })
             _detectorKinds[d.Id] = d.Kind;
 
         Logger.LogInformation(
@@ -252,6 +257,7 @@ public sealed class OSAntiCheatPlugin : BasePlugin, IPluginConfig<OSAntiCheatCon
                 _recoil.Remove(player.Slot);
                 _silent.Remove(player.Slot);
                 _antiAim.Remove(player.Slot);
+                _airGain.Remove(player.Slot);
                 _snap.Remove(player.Slot);
                 _nameChange.Remove(player.Slot);
                 _wallhack.Remove(player.Slot);
@@ -398,7 +404,10 @@ public sealed class OSAntiCheatPlugin : BasePlugin, IPluginConfig<OSAntiCheatCon
     /// </summary>
     private void Enforce(Signal signal, string edge)
     {
-        if (Array.IndexOf(Config.AutoActionEdges, edge) < 0) return;
+        // The airgain edge has a dedicated response (freeze in place) that needs no edge-list entry;
+        // every other edge must be explicitly armed in AutoActionEdges.
+        bool airgainFreeze = edge == "airgain-chain" && Config.AirGainFreezeSeconds > 0f;
+        if (!airgainFreeze && Array.IndexOf(Config.AutoActionEdges, edge) < 0) return;
 
         var suspect = Utilities.GetPlayerFromSlot(signal.PlayerSlot);
         // Never act on bots (test subjects under IncludeBots) or a player already gone.
@@ -411,6 +420,32 @@ public sealed class OSAntiCheatPlugin : BasePlugin, IPluginConfig<OSAntiCheatCon
             .Replace("{name}", suspect.PlayerName ?? "?")
             .Replace("{detector}", signal.Detector)
             .Replace("{edge}", edge);
+
+        if (airgainFreeze)
+        {
+            // Poetic justice for a bunnyhop script: the pawn freezes exactly where it is — mid-air
+            // when the chain is still going — thaws after the configured seconds, and the whole
+            // decision is audited like any other auto-action.
+            bool froze = Config.AutoActionEnabled && TryFreeze(suspect, Config.AirGainFreezeSeconds);
+            _alerts?.LogAction(signal, edge,
+                froze ? $"freeze-in-place {Config.AirGainFreezeSeconds:F0}s"
+                      : $"DRY-RUN: freeze-in-place {Config.AirGainFreezeSeconds:F0}s",
+                suspect.PlayerName, suspect.SteamID.ToString(), Server.MapName);
+            NotifyAdminsOfAction(suspect, signal, froze);
+            if (froze)
+            {
+                Logger.LogWarning("[OSAC] AUTO-ACTION [{Edge}] — froze {Name} ({SteamId}) in place for {Sec:F0}s :: {Reason}",
+                    edge, suspect.PlayerName, suspect.SteamID, Config.AirGainFreezeSeconds, signal.Reason);
+                if (!string.IsNullOrEmpty(Config.AirGainFreezeAnnounce))
+                    Server.PrintToChatAll(Fill(Config.AirGainFreezeAnnounce));
+            }
+            else
+            {
+                Logger.LogWarning("[OSAC] AUTO-ACTION [{Edge}] confirmed (DRY-RUN, no freeze) — {Name} ({SteamId}) :: {Reason}",
+                    edge, suspect.PlayerName, suspect.SteamID, signal.Reason);
+            }
+            return;
+        }
 
         string cmd = string.IsNullOrWhiteSpace(Config.AutoActionCommand) ? "" : Fill(Config.AutoActionCommand);
 
@@ -442,6 +477,34 @@ public sealed class OSAntiCheatPlugin : BasePlugin, IPluginConfig<OSAntiCheatCon
     }
 
     /// <summary>
+    /// Freeze the pawn exactly where it is (MOVETYPE_NONE stops all simulation — including gravity,
+    /// so a mid-air freeze hangs in the air) and thaw back to MOVETYPE_WALK after
+    /// <paramref name="seconds"/>. The thaw timer checks the pawn is still frozen first: death,
+    /// respawn or a map change resets movetype on its own and must not be overridden.
+    /// </summary>
+    private bool TryFreeze(CCSPlayerController player, float seconds)
+    {
+        var pawn = player.PlayerPawn.Value;
+        if (pawn is null || !pawn.IsValid || pawn.LifeState != (byte)LifeState_t.LIFE_ALIVE) return false;
+
+        pawn.MoveType = MoveType_t.MOVETYPE_NONE;
+        Schema.SetSchemaValue(pawn.Handle, "CBaseEntity", "m_nActualMoveType", (int)MoveType_t.MOVETYPE_NONE);
+        Utilities.SetStateChanged(pawn, "CBaseEntity", "m_MoveType");
+
+        int slot = player.Slot;
+        AddTimer(seconds, () =>
+        {
+            var p = Utilities.GetPlayerFromSlot(slot);
+            var pw = p?.PlayerPawn.Value;
+            if (pw is null || !pw.IsValid || pw.MoveType != MoveType_t.MOVETYPE_NONE) return;
+            pw.MoveType = MoveType_t.MOVETYPE_WALK;
+            Schema.SetSchemaValue(pw.Handle, "CBaseEntity", "m_nActualMoveType", (int)MoveType_t.MOVETYPE_WALK);
+            Utilities.SetStateChanged(pw, "CBaseEntity", "m_MoveType");
+        });
+        return true;
+    }
+
+    /// <summary>
     /// Two-line admin chat notice for an auto-action: no jargon in line one (CHEAT KICKED + name +
     /// cheat type + SteamID, everything needed to permaban), raw detector evidence in line two.
     /// </summary>
@@ -453,6 +516,7 @@ public sealed class OSAntiCheatPlugin : BasePlugin, IPluginConfig<OSAntiCheatCon
             "antiaim" => "ANTI-AIM",
             "namechanger" => "NICK-CHANGER",
             "wallhack.killburst" => "WALLHACK (blind headshot burst)",
+            "movement.airgain" => "BUNNYHOP SCRIPT (air-strafe beyond human)",
             _ => signal.Detector.ToUpperInvariant(),
         };
         string verdict = executed ? "CHEAT KICKED" : "CHEAT CONFIRMED (dry-run, NOT kicked)";
@@ -470,7 +534,7 @@ public sealed class OSAntiCheatPlugin : BasePlugin, IPluginConfig<OSAntiCheatCon
 
     private void PollSpinbot()
     {
-        if (!Config.EnableSpinbot && !Config.EnableAntiAim) return;
+        if (!Config.EnableSpinbot && !Config.EnableAntiAim && !Config.EnableAirGain) return;
         float now = Server.CurrentTime;
         foreach (var tracker in _tracking.Trackers.Values)
         {
@@ -478,9 +542,10 @@ public sealed class OSAntiCheatPlugin : BasePlugin, IPluginConfig<OSAntiCheatCon
             if (player is null) continue;
             if (player.IsBot && !Config.IncludeBots) continue; // skip bots unless testing
             if (Config.EnableSpinbot) Report(_spinbot, _spinbot.Inspect(tracker));
-            // Anti-aim rides the same cadence: OnPoll consumes each buffered tick exactly once
-            // (sequence-tracked), so a 0.2 s poll over the ~2 s ring buffer misses nothing.
+            // Anti-aim and air-gain ride the same cadence: OnPoll consumes each buffered tick
+            // exactly once (sequence-tracked), so a 0.2 s poll over the ~2 s ring buffer misses nothing.
             if (Config.EnableAntiAim) Report(_antiAim, _antiAim.OnPoll(tracker, now));
+            if (Config.EnableAirGain) Report(_airGain, _airGain.OnPoll(tracker, now));
         }
     }
 
@@ -496,6 +561,8 @@ public sealed class OSAntiCheatPlugin : BasePlugin, IPluginConfig<OSAntiCheatCon
         _killBurst.Reset();
         // Aim-drift baseline is the CURRENT map's lobby — per-map evidence like the null test.
         _aimDrift.Reset();
+        // Air-gain hop evidence is per-map for the same reason (and hop windows never span maps).
+        _airGain.Reset();
         _chatThrottle.Reset(); // fresh map, fresh notice budget per player
         if (string.IsNullOrWhiteSpace(Config.BakesDir))
         {
@@ -845,6 +912,7 @@ public sealed class OSAntiCheatPlugin : BasePlugin, IPluginConfig<OSAntiCheatCon
         "aimbot.sweep" => "hits mid-swing more than usual",
         "aimbot.silent" => "hits without looking at the target",
         "anti-recoil" => "recoil control looks mechanical",
+        "movement.airgain" => "gains speed mid-air hop after hop, like a script",
         "triggerbot" => "fires the instant a target crosses the crosshair",
         "spinbot" => "impossible spinning",
         "antiaim" => "impossible view angles",
