@@ -220,6 +220,86 @@ public class MovementAirGainDetectorTests
     }
 
     [Fact]
+    public void Sub_sprint_slow_hop_chain_stays_silent()
+    {
+        // The verified live FP (R1, 2026-08-15 de_vandal): launches ~175 u/s, gains +37 in the
+        // air, peaks ~212 — big RELATIVE gain, but the chain never reaches sprint speed (250).
+        // A script bhops to go faster than running; this is a hand losing speed to its own
+        // landings. The whisper's peak floor must keep it silent.
+        var d = new MovementAirGainDetector();
+        var tr = new PlayerTracker(4096, slot: 1);
+        FeedGround(tr, 20, 175f);
+        Signal? sig = null;
+        float t = 0;
+        for (int hop = 0; hop < 6; hop++)
+        {
+            t = FeedHop(tr, 175f, 37f);          // peak 212 < 250 sprint cap
+            t = FeedGround(tr, 4, 175f);
+            sig = Drain(d, tr, t) ?? sig;
+        }
+        Assert.Null(sig);
+    }
+
+    [Fact]
+    public void Stale_window_does_not_rewhisper_on_lone_jumps()
+    {
+        // The other half of the same live FP: one whisper-level burst, then ordinary lone jumps
+        // after the cooldown. The 90 s window still holds the burst's arcs and every landing
+        // re-evaluates them — but with no NEW chained arc there is no new evidence, and re-firing
+        // would let fusion count one event three times (that R1 reached Review exactly this way).
+        var d = new MovementAirGainDetector();
+        var tr = new PlayerTracker(65536, slot: 1);
+        FeedGround(tr, 20, 240f);
+        Signal? first = null;
+        float t = 0;
+        for (int hop = 0; hop < 6; hop++)
+        {
+            t = FeedHop(tr, 240f, 30f);          // whisper territory: +30 median, peak 270
+            t = FeedGround(tr, 4, 240f);
+            first = Drain(d, tr, t) ?? first;
+        }
+        Assert.NotNull(first);
+        Signal? again = null;
+        for (int jump = 0; jump < 3; jump++)
+        {
+            t = FeedGround(tr, 1600, 250f);      // 25 s run — cooldown expired, chain broken
+            t = FeedHop(tr, 250f, 30f);          // an innocent lone jump, arc closes, window re-evaluates
+            t = FeedGround(tr, 4, 250f);
+            again = Drain(d, tr, t) ?? again;
+        }
+        Assert.Null(again);
+    }
+
+    [Fact]
+    public void Second_burst_earns_a_second_whisper()
+    {
+        // Fresh evidence must still speak: a SECOND chained burst inside the window (new arcs, not
+        // a stale re-read) fires again after the cooldown — two bursts in 90 s remain suspicious.
+        var d = new MovementAirGainDetector();
+        var tr = new PlayerTracker(65536, slot: 1);
+        FeedGround(tr, 20, 240f);
+        Signal? first = null;
+        float t = 0;
+        for (int hop = 0; hop < 6; hop++)
+        {
+            t = FeedHop(tr, 240f, 30f);
+            t = FeedGround(tr, 4, 240f);
+            first = Drain(d, tr, t) ?? first;
+        }
+        Assert.NotNull(first);
+        t = FeedGround(tr, 1600, 250f);          // 25 s run: cooldown expired, window still open
+        Signal? second = null;
+        for (int hop = 0; hop < 3; hop++)
+        {
+            t = FeedHop(tr, 240f, 30f);
+            t = FeedGround(tr, 4, 240f);
+            second = Drain(d, tr, t) ?? second;
+        }
+        Assert.NotNull(second);
+        Assert.Null(second!.Value.Edge);
+    }
+
+    [Fact]
     public void Teleport_speeds_void_the_arc()
     {
         var d = new MovementAirGainDetector();

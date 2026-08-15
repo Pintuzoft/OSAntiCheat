@@ -140,7 +140,7 @@ public sealed class OSAntiCheatPlugin : BasePlugin, IPluginConfig<OSAntiCheatCon
         _silent = new SilentAimDetector(config.SilentAimOffDeg, config.SilentAimMinHits);
         _antiAim = new AntiAimDetector(config.AntiAimPitchDeg, config.AntiAimJitterDeg, config.AntiAimJitterFlips);
         _airGain = new MovementAirGainDetector(
-            config.AirGainMinArcs, config.AirGainSignalMedianGain,
+            config.AirGainMinArcs, config.AirGainSignalMedianGain, config.AirGainSignalMinPeakSpeed,
             config.AirGainEdgeMinArcs, config.AirGainEdgeMedianGain, config.AirGainEdgeMinPeakSpeed);
         _snap = new SnapDetector(config.SnapExactDeg, config.SnapOffFloorDeg, config.SnapMinSnaps);
         _nameChange = new NameChangeDetector(config.NameChangeMinChanges, config.NameChangeWindowSeconds);

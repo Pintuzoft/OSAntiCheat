@@ -26,9 +26,16 @@ namespace OSAntiCheat.Detection.Detectors;
 /// windowed median +71.1, every single jump gaining +67…+150. The edge gate (median ≥ +40 AND
 /// median peak ≥ 300 u/s over ≥5 chained arcs) sits ~3× above the honest maximum ever measured
 /// and additionally demands sustained over-sprint speed — beyond-human on both counts, so the
-/// edge is auto-action material (the freeze response). The whisper gate (median ≥ +25 over ≥5)
-/// feeds fusion: bhop ships in the same rage packages as wall/aim, and this is the stack's only
-/// movement axis — fully independent corroboration.
+/// edge is auto-action material (the freeze response). The whisper gate (median ≥ +25 at median
+/// peak ≥ 250 over ≥5) feeds fusion: bhop ships in the same rage packages as wall/aim, and this is
+/// the stack's only movement axis — fully independent corroboration. The whisper's peak floor is
+/// the sprint cap: a script bhops to go FASTER than running, so a chain whose peaks never reach
+/// 250 is a hand losing speed to its own landings and strafing some back (R1, 2026-08-15
+/// de_vandal: launch ~175, median gain +37, median peak 216 — demo-verified human). A whisper also
+/// demands FRESH evidence — at least two chained arcs since the last signal (a burst, not a stale
+/// re-read) — because the window holds arcs for 90 s and every landing re-evaluates it: without
+/// that gate one burst re-fires on later lone jumps each cooldown and fusion counts a single
+/// event three times (how R1 reached Review).
 ///
 /// Feed via <see cref="OnPoll"/> at any cadence — it processes each tick exactly once using the
 /// tracker's sequence numbers, so a 0.2 s poll over the ~2 s ring buffer misses nothing.
@@ -53,6 +60,7 @@ public sealed class MovementAirGainDetector : IDetector
 
     private readonly int _minArcs;                      // whisper: chained arcs needed in the window
     private readonly float _signalMedianGain;           // whisper: median air gain (u/s)
+    private readonly float _signalMinPeakSpeed;         // whisper: median per-arc peak (u/s) — sub-sprint chains are hands
     private readonly int _edgeMinArcs;                  // edge: chained arcs needed
     private readonly float _edgeMedianGain;             // edge: median air gain (u/s)
     private readonly float _edgeMinPeakSpeed;           // edge: median per-arc peak speed (u/s, sprint = 250)
@@ -71,16 +79,18 @@ public sealed class MovementAirGainDetector : IDetector
         public (float Time, float Gain, float Peak)? PendingStarter;
         public readonly List<(float Time, float Gain, float Peak)> Arcs = new();
         public float LastSignal = float.NegativeInfinity;
+        public int FreshArcs;                           // chained arcs landed since the last signal
     }
 
     private readonly Dictionary<int, SlotState> _slots = new();
 
     public MovementAirGainDetector(
-        int minArcs = 5, float signalMedianGain = 25f,
+        int minArcs = 5, float signalMedianGain = 25f, float signalMinPeakSpeed = 250f,
         int edgeMinArcs = 5, float edgeMedianGain = 40f, float edgeMinPeakSpeed = 300f)
     {
         _minArcs = Math.Max(2, minArcs);
         _signalMedianGain = signalMedianGain;
+        _signalMinPeakSpeed = signalMinPeakSpeed;
         _edgeMinArcs = Math.Max(_minArcs, edgeMinArcs);
         _edgeMedianGain = edgeMedianGain;
         _edgeMinPeakSpeed = edgeMinPeakSpeed;
@@ -166,9 +176,10 @@ public sealed class MovementAirGainDetector : IDetector
                 // The burst STARTER belongs to the chain: hop 1 has no landing behind it, but the
                 // moment hop 2 chains onto it, both are the same scripted run — a 4-hop burst must
                 // count 4 arcs, or short-burst scripts slide under the arc minimum.
-                if (st.PendingStarter is { } starter) st.Arcs.Add(starter);
+                if (st.PendingStarter is { } starter) { st.Arcs.Add(starter); st.FreshArcs++; }
                 st.PendingStarter = null;
                 st.Arcs.Add((now, st.PeakSpeed - st.LaunchSpeed, st.PeakSpeed));
+                st.FreshArcs++;
             }
             else if (shapeOk && st.LaunchSpeed >= MinLaunchSpeed)
             {
@@ -193,20 +204,29 @@ public sealed class MovementAirGainDetector : IDetector
             {
                 st.LastSignal = now;
                 st.Arcs.Clear();   // an edge consumed the evidence; a repeat must be earned fresh
+                st.FreshArcs = 0;
                 signal = new Signal(Id, tracker.Slot, now, 0.95f,
                     $"gains speed mid-air across {n} chained hops: median +{medGain:F0} u/s per hop, " +
-                    $"median peak {medPeak:F0} u/s (sprint cap 250; honest corpus max +14 median) — " +
+                    $"median peak {medPeak:F0} u/s (sprint cap 250; honest corpus max +21 median) — " +
                     "air-strafe sync at tick rate, not a hand",
                     Edge: "airgain-chain");
             }
-            else if (medGain >= _signalMedianGain && now - st.LastSignal > CooldownSeconds)
+            // The whisper demands: over-sprint peaks (a chain slower than running is a hand, not a
+            // script — R1's verified-human burst peaked at 216) and FRESH evidence, at least two
+            // chained arcs since the last signal. Two, because a burst is by definition ≥2 landings:
+            // the 90 s window re-evaluates on every landing, so a lone jump — or a single arc
+            // trailing the signal that consumed its burst — must never re-fire the same stale
+            // window each cooldown and let fusion count one event three times.
+            else if (medGain >= _signalMedianGain && medPeak >= _signalMinPeakSpeed
+                     && st.FreshArcs >= 2 && now - st.LastSignal > CooldownSeconds)
             {
                 st.LastSignal = now;
+                st.FreshArcs = 0;
                 float span = MathF.Max(1f, _edgeMedianGain - _signalMedianGain);
                 float conf = 0.5f + 0.3f * MathF.Min(1f, (medGain - _signalMedianGain) / span);
                 signal = new Signal(Id, tracker.Slot, now, conf,
-                    $"gains speed mid-air across {n} chained hops: median +{medGain:F0} u/s per hop " +
-                    $"(honest corpus max +14 median) — bunnyhop-script territory");
+                    $"gains speed mid-air across {n} chained hops: median +{medGain:F0} u/s per hop, " +
+                    $"median peak {medPeak:F0} u/s (honest corpus max +21 median) — bunnyhop-script territory");
             }
         }
         return signal;

@@ -4,6 +4,36 @@ Version history for OSAntiCheat, newest first. Every release gets an entry here;
 describes the current state only. Player/admin names follow the pseudonym scheme from
 [TODO.md](TODO.md) (Cn = typed cheater, Gn = griefer, Rn = regular, An = admin).
 
+## v0.9.107 — the whisper learns what a script is for (first verified airgain FP)
+
+An R1 hit Review on movement.airgain alone (2026-08-15 de_vandal) and the demo proves him
+human. Two gaps, both closed:
+
+- **The whisper now demands over-sprint peaks** (`AirGainSignalMinPeakSpeed`, default 250).
+  The R1's one real chain gained a median +37 u/s — but from ~175 u/s launches up to a median
+  peak of 216, SLOWER than running. A script bhops to go faster than sprint (C9 peaked
+  300–400); a chain that never reaches 250 is a hand losing speed to its own landings and
+  strafing some back. Big relative gain at sub-sprint speed is now recognized as the human
+  signature it is. (The edge already had its own peak gate at 300 — only the whisper was blind.)
+- **A whisper needs FRESH evidence: ≥2 chained arcs since the last signal.** Only the edge
+  cleared the window; every landing re-evaluates it, so the R1's single burst re-fired on two
+  innocent lone jumps as each 20 s cooldown lapsed — three identical signals for one event,
+  1.12 → 1.96 → 2.64 = Review, pure repetition. Two arcs because a burst is by definition two
+  landings: a second real burst inside the window still whispers again, a trailing hop or a
+  stale re-read never does.
+
+Either fix alone silences the whole incident — verified by replaying the R1's demo through
+the real detector (the same reconstruction reproduces the live chain 1:1: same 5 arcs, same
++37/216 medians; post-fix, zero signals). C9 stays caught by construction: the edge branch is
+untouched (it never needed the whisper gates — its own peak floor is 300) and both edge tests
+model C9's exact shape. A flags-based demo replay of C9's boston session is blind to his
+chains — script-tight re-jumps never show FL_ONGROUND in the demo, the same z-inference
+limit v0.9.101 documented — so that check runs on the unit models, not the demo. Reason
+strings also correct "honest corpus max +14" → "+21" (the windowed statistic from v0.9.101 —
+the whole point of that release was that the rolling window is the honest yardstick).
+
+Config schema v25 → v26 (one new key, defaulted). 124 tests.
+
 ## v0.9.106 — the freeze goes latent until a real cheater validates it
 
 Owner's call, and the ladder's own rule applied to our newest edge: regular folk must never

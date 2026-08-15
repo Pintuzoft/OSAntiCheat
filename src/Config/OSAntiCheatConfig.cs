@@ -15,7 +15,7 @@ public sealed class OSAntiCheatConfig : BasePluginConfig
     // below. Pinned server values must therefore live in OSAntiCheat.local.json (the overlay, v0.9.97),
     // which regeneration never touches. After any schema-bump release: verify the overlay file exists
     // and that the load log shows its keys applied.
-    public override int Version { get; set; } = 25;
+    public override int Version { get; set; } = 26;
 
     /// <summary>
     /// Include bots as detection subjects. Bots have perfect server-driven aim so they trip the
@@ -216,6 +216,12 @@ public sealed class OSAntiCheatConfig : BasePluginConfig
 
     /// <summary>Median air gain (u/s per hop) for the fusion whisper. Honest windowed max: 21.0.</summary>
     public float AirGainSignalMedianGain { get; set; } = 25f;
+
+    /// <summary>Median per-arc peak speed (u/s) the whisper also demands. Sprint cap is 250: a
+    /// script bhops to go FASTER than running, so a chain whose peaks stay under sprint speed is a
+    /// hand losing speed to its landings and strafing some back — verified human on a live FP
+    /// (2026-08-15 de_vandal: median gain +37 but median peak 216, an R1 slow-hopping).</summary>
+    public float AirGainSignalMinPeakSpeed { get; set; } = 250f;
 
     /// <summary>Chained arcs needed for the auto-action edge (a downhill burst dies by hop three).</summary>
     public int AirGainEdgeMinArcs { get; set; } = 5;
