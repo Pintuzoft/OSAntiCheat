@@ -4,6 +4,21 @@ Version history for OSAntiCheat, newest first. Every release gets an entry here;
 describes the current state only. Player/admin names follow the pseudonym scheme from
 [TODO.md](TODO.md) (Cn = typed cheater, Gn = griefer, Rn = regular, An = admin).
 
+## v0.9.105 — the speeding ticket
+
+The freeze announce gets the owner's voice: " [OSAC] SPEEDING TICKET: {name} — impossible
+mid-air acceleration (bunnyhop script). Parked as a statue until the round ends." Playful,
+but still inside the messaging rule — "impossible acceleration" is literally the measurement
+(honest max +21 u/s windowed median across 43 demos; the edge demands +40 at over-sprint).
+If your config was already generated on v24 the old string is stored — regenerate or pin the
+new one in the overlay.
+
+Round-end auto-BAN was considered and deliberately NOT built yet: the edge has zero live
+catches so far, and the ban ladder starts the same place the kick edges did — freeze +
+evidence + human ban first, automation after the axis has a clean live record.
+
+Config schema unchanged (v24). 121 tests.
+
 ## v0.9.104 — the frozen cheat is disarmed
 
 Second finding from the owner's self-freeze drill: MOVETYPE_NONE stops movement, not

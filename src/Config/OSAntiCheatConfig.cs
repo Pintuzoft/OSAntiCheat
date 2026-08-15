@@ -235,9 +235,11 @@ public sealed class OSAntiCheatConfig : BasePluginConfig
     /// </summary>
     public float AirGainFreezeSeconds { get; set; } = -1f;
 
-    /// <summary>Public chat line when the freeze lands. Placeholders: {name} {steamid} {detector}. Empty = silent.</summary>
+    /// <summary>Public chat line when the freeze lands. Playful on purpose (the owner's voice) but
+    /// never overclaiming: "impossible acceleration" is literally the measurement. Placeholders:
+    /// {name} {steamid} {detector}. Empty = silent.</summary>
     public string AirGainFreezeAnnounce { get; set; } =
-        " [OSAC] {name} frozen mid-air — movement input beyond human (bunnyhop script)";
+        " [OSAC] SPEEDING TICKET: {name} — impossible mid-air acceleration (bunnyhop script). Parked as a statue until the round ends.";
 
     /// <summary>
     /// Aimbot snap (pull-to-head): ≥ SnapOffFloorDeg off a head one tick before the shot →
