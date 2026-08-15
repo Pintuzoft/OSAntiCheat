@@ -100,6 +100,25 @@ public class MovementAirGainDetectorTests
     }
 
     [Fact]
+    public void Hop_spam_at_constant_speed_stays_silent()
+    {
+        // Jumping constantly is not the crime — gaining speed in the air is. A dozen chained
+        // hops at sprint speed with no air gain must not even whisper.
+        var d = new MovementAirGainDetector();
+        var tr = new PlayerTracker(4096, slot: 1);
+        FeedGround(tr, 20, 250f);
+        Signal? sig = null;
+        float t = 0;
+        for (int hop = 0; hop < 12; hop++)
+        {
+            t = FeedHop(tr, 250f, 2f);
+            t = FeedGround(tr, 4, 250f);         // frame-tight chain, zero gain
+            sig = Drain(d, tr, t) ?? sig;
+        }
+        Assert.Null(sig);
+    }
+
+    [Fact]
     public void Unchained_big_jumps_never_build_evidence()
     {
         // Big single gains (an HE boost, a long-jump strafe) separated by normal running.
