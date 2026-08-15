@@ -4,6 +4,20 @@ Version history for OSAntiCheat, newest first. Every release gets an entry here;
 describes the current state only. Player/admin names follow the pseudonym scheme from
 [TODO.md](TODO.md) (Cn = typed cheater, Gn = griefer, Rn = regular, An = admin).
 
+## v0.9.102 — the freeze holds for the rest of the round
+
+Ten seconds was the cautious default; the owner's call is harsher and simpler: a confirmed
+bunnyhop script stays frozen until the round ends. `AirGainFreezeSeconds` default 10 → −1
+(negative = rest of round). No thaw timer exists in that mode — the next respawn's fresh pawn
+carries a normal movetype, so the engine itself is the thaw. Until then the mid-air statue is
+a free target. Positive values still mean a timed freeze; 0 still routes the edge through the
+generic AutoActionCommand path.
+
+NOTE for already-generated v24 configs: the stored `AirGainFreezeSeconds: 10` wins over the
+new default — set it to −1 in the overlay (or regenerate) to get rest-of-round.
+
+Config schema unchanged (v24). 121 tests.
+
 ## v0.9.101 — airgain recalibrated on the rolling-window statistic (and the clamp trap)
 
 Post-release calibration against the corpus using the EXACT statistic the live detector

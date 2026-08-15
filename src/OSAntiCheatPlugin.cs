@@ -406,7 +406,7 @@ public sealed class OSAntiCheatPlugin : BasePlugin, IPluginConfig<OSAntiCheatCon
     {
         // The airgain edge has a dedicated response (freeze in place) that needs no edge-list entry;
         // every other edge must be explicitly armed in AutoActionEdges.
-        bool airgainFreeze = edge == "airgain-chain" && Config.AirGainFreezeSeconds > 0f;
+        bool airgainFreeze = edge == "airgain-chain" && Config.AirGainFreezeSeconds != 0f;
         if (!airgainFreeze && Array.IndexOf(Config.AutoActionEdges, edge) < 0) return;
 
         var suspect = Utilities.GetPlayerFromSlot(signal.PlayerSlot);
@@ -424,18 +424,20 @@ public sealed class OSAntiCheatPlugin : BasePlugin, IPluginConfig<OSAntiCheatCon
         if (airgainFreeze)
         {
             // Poetic justice for a bunnyhop script: the pawn freezes exactly where it is — mid-air
-            // when the chain is still going — thaws after the configured seconds, and the whole
-            // decision is audited like any other auto-action.
+            // when the chain is still going. Negative seconds = REST OF THE ROUND: no thaw timer at
+            // all, the next round's respawn hands out a fresh pawn with a normal movetype (and until
+            // then the frozen cheat is a free target). Audited like any other auto-action.
+            string span = Config.AirGainFreezeSeconds < 0f
+                ? "rest of round" : $"{Config.AirGainFreezeSeconds:F0}s";
             bool froze = Config.AutoActionEnabled && TryFreeze(suspect, Config.AirGainFreezeSeconds);
             _alerts?.LogAction(signal, edge,
-                froze ? $"freeze-in-place {Config.AirGainFreezeSeconds:F0}s"
-                      : $"DRY-RUN: freeze-in-place {Config.AirGainFreezeSeconds:F0}s",
+                froze ? $"freeze-in-place ({span})" : $"DRY-RUN: freeze-in-place ({span})",
                 suspect.PlayerName, suspect.SteamID.ToString(), Server.MapName);
             NotifyAdminsOfAction(suspect, signal, froze);
             if (froze)
             {
-                Logger.LogWarning("[OSAC] AUTO-ACTION [{Edge}] — froze {Name} ({SteamId}) in place for {Sec:F0}s :: {Reason}",
-                    edge, suspect.PlayerName, suspect.SteamID, Config.AirGainFreezeSeconds, signal.Reason);
+                Logger.LogWarning("[OSAC] AUTO-ACTION [{Edge}] — froze {Name} ({SteamId}) in place ({Span}) :: {Reason}",
+                    edge, suspect.PlayerName, suspect.SteamID, span, signal.Reason);
                 if (!string.IsNullOrEmpty(Config.AirGainFreezeAnnounce))
                     Server.PrintToChatAll(Fill(Config.AirGainFreezeAnnounce));
             }
@@ -478,9 +480,10 @@ public sealed class OSAntiCheatPlugin : BasePlugin, IPluginConfig<OSAntiCheatCon
 
     /// <summary>
     /// Freeze the pawn exactly where it is (MOVETYPE_NONE stops all simulation — including gravity,
-    /// so a mid-air freeze hangs in the air) and thaw back to MOVETYPE_WALK after
-    /// <paramref name="seconds"/>. The thaw timer checks the pawn is still frozen first: death,
-    /// respawn or a map change resets movetype on its own and must not be overridden.
+    /// so a mid-air freeze hangs in the air). Positive <paramref name="seconds"/> thaws back to
+    /// MOVETYPE_WALK on a timer; negative = rest of the round (no timer — the next respawn's fresh
+    /// pawn carries a normal movetype, so the thaw is the engine's own). The thaw timer checks the
+    /// pawn is still frozen first: death, respawn or a map change must not be overridden.
     /// </summary>
     private bool TryFreeze(CCSPlayerController player, float seconds)
     {
@@ -490,6 +493,8 @@ public sealed class OSAntiCheatPlugin : BasePlugin, IPluginConfig<OSAntiCheatCon
         pawn.MoveType = MoveType_t.MOVETYPE_NONE;
         Schema.SetSchemaValue(pawn.Handle, "CBaseEntity", "m_nActualMoveType", (int)MoveType_t.MOVETYPE_NONE);
         Utilities.SetStateChanged(pawn, "CBaseEntity", "m_MoveType");
+
+        if (seconds < 0f) return true;   // rest of round: the respawn thaws, nothing to schedule
 
         int slot = player.Slot;
         AddTimer(seconds, () =>

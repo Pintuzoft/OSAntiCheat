@@ -227,11 +227,13 @@ public sealed class OSAntiCheatConfig : BasePluginConfig
     public float AirGainEdgeMinPeakSpeed { get; set; } = 300f;
 
     /// <summary>
-    /// Freeze response for the airgain edge: the pawn freezes IN PLACE (mid-air included) for this
-    /// many seconds, then thaws. 0 disables the freeze — the edge then goes through the generic
-    /// <see cref="AutoActionCommand"/> path instead (requires "airgain-chain" in <see cref="AutoActionEdges"/>).
+    /// Freeze response for the airgain edge: the pawn freezes IN PLACE (mid-air included).
+    /// Negative = REST OF THE ROUND (default; the next respawn thaws — and until then the frozen
+    /// cheat is a free target). Positive = that many seconds, then thaw. 0 disables the freeze —
+    /// the edge then goes through the generic <see cref="AutoActionCommand"/> path instead
+    /// (requires "airgain-chain" in <see cref="AutoActionEdges"/>).
     /// </summary>
-    public float AirGainFreezeSeconds { get; set; } = 10f;
+    public float AirGainFreezeSeconds { get; set; } = -1f;
 
     /// <summary>Public chat line when the freeze lands. Placeholders: {name} {steamid} {detector}. Empty = silent.</summary>
     public string AirGainFreezeAnnounce { get; set; } =
