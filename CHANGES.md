@@ -4,6 +4,18 @@ Version history for OSAntiCheat, newest first. Every release gets an entry here;
 describes the current state only. Player/admin names follow the pseudonym scheme from
 [TODO.md](TODO.md) (Cn = typed cheater, Gn = griefer, Rn = regular, An = admin).
 
+## v0.9.103 — the action notice says what actually happened
+
+The owner froze himself testing the airgain chain (thresholds lowered via overlay,
+`sv_autobunnyhopping 1` for script-grade re-jump timing — a fine end-to-end drill: whisper →
+red alert → edge → freeze announce all landed). The admin evidence line, though, opened with
+"CHEAT KICKED" — a verdict hardcoded in the kick era, now plainly false while the frozen
+cheat hangs mid-air in front of everyone. The messaging rule says the line must never lie:
+the notice now carries the action's own verb — "CHEAT FROZEN" for the freeze, "CHEAT KICKED"
+for the command path, and dry-runs spell out what was NOT done.
+
+Config schema unchanged (v24). 121 tests.
+
 ## v0.9.102 — the freeze holds for the rest of the round
 
 Ten seconds was the cautious default; the owner's call is harsher and simpler: a confirmed

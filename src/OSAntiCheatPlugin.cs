@@ -433,7 +433,7 @@ public sealed class OSAntiCheatPlugin : BasePlugin, IPluginConfig<OSAntiCheatCon
             _alerts?.LogAction(signal, edge,
                 froze ? $"freeze-in-place ({span})" : $"DRY-RUN: freeze-in-place ({span})",
                 suspect.PlayerName, suspect.SteamID.ToString(), Server.MapName);
-            NotifyAdminsOfAction(suspect, signal, froze);
+            NotifyAdminsOfAction(suspect, signal, froze, verb: "FROZEN");
             if (froze)
             {
                 Logger.LogWarning("[OSAC] AUTO-ACTION [{Edge}] — froze {Name} ({SteamId}) in place ({Span}) :: {Reason}",
@@ -510,10 +510,11 @@ public sealed class OSAntiCheatPlugin : BasePlugin, IPluginConfig<OSAntiCheatCon
     }
 
     /// <summary>
-    /// Two-line admin chat notice for an auto-action: no jargon in line one (CHEAT KICKED + name +
+    /// Two-line admin chat notice for an auto-action: no jargon in line one (CHEAT KICKED/FROZEN + name +
     /// cheat type + SteamID, everything needed to permaban), raw detector evidence in line two.
     /// </summary>
-    private void NotifyAdminsOfAction(CCSPlayerController suspect, Signal signal, bool executed)
+    private void NotifyAdminsOfAction(CCSPlayerController suspect, Signal signal, bool executed,
+        string verb = "KICKED")
     {
         string what = signal.Detector switch
         {
@@ -524,7 +525,10 @@ public sealed class OSAntiCheatPlugin : BasePlugin, IPluginConfig<OSAntiCheatCon
             "movement.airgain" => "BUNNYHOP SCRIPT (air-strafe beyond human)",
             _ => signal.Detector.ToUpperInvariant(),
         };
-        string verdict = executed ? "CHEAT KICKED" : "CHEAT CONFIRMED (dry-run, NOT kicked)";
+        // The verb must match what actually happened — "KICKED" while the frozen cheat is still
+        // visibly on the server would make the notice lie, and the first wrong line costs the
+        // system its credibility (the owner's messaging rule).
+        string verdict = executed ? $"CHEAT {verb}" : $"CHEAT CONFIRMED (dry-run, NOT {verb.ToLowerInvariant()})";
         string line1 =
             $" {ChatColors.Red}[OSAC] {verdict}{ChatColors.Default}: " +
             $"{ChatColors.Green}{suspect.PlayerName ?? "?"}{ChatColors.Default} — {what} " +
