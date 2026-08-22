@@ -15,7 +15,7 @@ public sealed class OSAntiCheatConfig : BasePluginConfig
     // below. Pinned server values must therefore live in OSAntiCheat.local.json (the overlay, v0.9.97),
     // which regeneration never touches. After any schema-bump release: verify the overlay file exists
     // and that the load log shows its keys applied.
-    public override int Version { get; set; } = 27;
+    public override int Version { get; set; } = 28;
 
     /// <summary>
     /// Include bots as detection subjects. Bots have perfect server-driven aim so they trip the
@@ -146,6 +146,12 @@ public sealed class OSAntiCheatConfig : BasePluginConfig
 
     /// <summary>Repeated locks required before flagging — one exact hit is chance (~0.2%), never a lock.</summary>
     public int BoneLockMinSpikes { get; set; } = 3;
+
+    /// <summary>Aim travel (degrees) required between two counted head-centre locks. One frozen hold
+    /// tapped six times is ONE lock, not six (the 2026-08-20 wallbang Review). A bot re-locks across
+    /// engagements and the view travels between them; 2° is below any target switch.</summary>
+    [JsonPropertyName("BoneLockReacquireDeg")]
+    public float BoneLockReacquireDeg { get; set; } = 2f;
 
     /// <summary>
     /// Anti-recoil (script/macro/firmware): recoil compensation too consistent to be human. A

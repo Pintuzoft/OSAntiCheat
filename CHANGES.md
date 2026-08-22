@@ -4,6 +4,29 @@ Version history for OSAntiCheat, newest first. Every release gets an entry here;
 describes the current state only. Player/admin names follow the pseudonym scheme from
 [TODO.md](TODO.md) (Cn = typed cheater, Gn = griefer, Rn = regular, An = admin).
 
+## v0.9.109 — one hold is one lock (first bonelock Review was a wallbang)
+
+aimbot.bonelock's first live Review (2026-08-20 de_canals, a regular, "5 head-centre locks ≤0.050°,
+latest 0.000°") replayed from the demo: six AK taps in 1.5 s at 300–450 ms spacing, view rate 0,
+shooter stationary, enemy stationary behind a penetrable surface — damage 9/9/miss/41/33/10 and a
+kill, never a headshot. The crosshair sat by chance within a quant step of the model head
+(feet+64) and the detector counted the same frozen hold once per tap. The rest of his profile
+is an ordinary hand: median head error 2.42° (worse than most of the lobby), spray spread 15.7°,
+wall axes flat. Same lesson as the airgain whisper in v0.9.107: repetition is not evidence.
+
+- **A lock counts only when the aim has RE-ACQUIRED it**: the view must have travelled
+  ≥ `BoneLockReacquireDeg` (default 2°) from the last counted lock — any buffered tick or shot
+  since then. A bot re-locks across engagements and travels between them; a held crosshair
+  tapped six times is one lock. Schema v28.
+- DemoReplay's offline counter mirrors the rule and prints the held taps separately
+  (`spike<=0.05: 1 (+4 same-hold taps)`). The 20 Aug demo: MrJozk 5 → 1, level with two other
+  regulars in the same lobby; the LOGIC BREACH section is empty.
+- The bot test now models an actual bot (lock → travel → lock); a new test pins the frozen-hold
+  shape to zero signals. 128 tests green.
+
+Open: the only other live bonelock Watch (2026-08-15 de_maginot) has no demo in hand, so it is
+unverified either way.
+
 ## v0.9.108 — drift may double a case, never build one (twelve regulars whispered)
 
 Six nights of v0.9.107 produced nine whispers; eight were aim.drift ALONE on eight different

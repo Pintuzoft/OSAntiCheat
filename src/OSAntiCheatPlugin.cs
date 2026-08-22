@@ -138,7 +138,7 @@ public sealed class OSAntiCheatPlugin : BasePlugin, IPluginConfig<OSAntiCheatCon
         _triggerbot = new TriggerbotDetector(config.TriggerbotHumanFloorMs, config.TriggerbotMinShots);
         _spinbot = new SpinbotDetector(config.SpinbotMinRateDegPerSec, config.SpinbotMinSpinHsKills);
         // (SpinbotMinRateDegPerSec is the per-tick spin floor; the continuous-turn gate is internal.)
-        _boneLock = new BoneLockDetector(config.BoneLockSpikeDeg, config.BoneLockMinSpikes);
+        _boneLock = new BoneLockDetector(config.BoneLockSpikeDeg, config.BoneLockMinSpikes, config.BoneLockReacquireDeg);
         _recoil = new RecoilDetector(config.RecoilMaxRatio, config.RecoilMinSprays);
         _silent = new SilentAimDetector(config.SilentAimOffDeg, config.SilentAimMinHits);
         _antiAim = new AntiAimDetector(config.AntiAimPitchDeg, config.AntiAimJitterDeg, config.AntiAimJitterFlips);

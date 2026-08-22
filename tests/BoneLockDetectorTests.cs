@@ -37,12 +37,30 @@ public class BoneLockDetectorTests
         var shooter = new PlayerTracker(64, slot: 1);
         var enemy = new PlayerTracker(64, slot: 2);
 
+        // A bot: exact lock, then the view travels off to something else, then exact lock again.
         Signal? last = null;
-        for (int seq = 0; seq < 3; seq++)
-            last = Fire(d, shooter, enemy, seq, seq * TickDt, dist: 1000f, yawOffset: 0f); // exact lock
+        int seq = 0;
+        for (int i = 0; i < 3; i++)
+        {
+            last = Fire(d, shooter, enemy, seq, seq * TickDt, dist: 1000f, yawOffset: 0f); seq++; // exact lock
+            Fire(d, shooter, enemy, seq, seq * TickDt, dist: 1000f, yawOffset: 4f); seq++;        // re-acquire travel
+        }
 
         Assert.NotNull(last);
         Assert.Equal("aimbot.bonelock", last!.Value.Detector);
+    }
+
+    /// <summary>The 2026-08-20 shape: a stationary hold by chance on the model head, tapped six
+    /// times through a wall with the view never moving. One lock, however many taps.</summary>
+    [Fact]
+    public void Frozen_hold_tapped_repeatedly_is_one_lock()
+    {
+        var d = new BoneLockDetector(spikeDeg: 0.05f, minSpikes: 3);
+        var shooter = new PlayerTracker(64, slot: 1);
+        var enemy = new PlayerTracker(64, slot: 2);
+
+        for (int seq = 0; seq < 6; seq++)
+            Assert.Null(Fire(d, shooter, enemy, seq, seq * 0.33f, dist: 1000f, yawOffset: seq % 2 == 0 ? 0f : 0.04f));
     }
 
     [Fact]

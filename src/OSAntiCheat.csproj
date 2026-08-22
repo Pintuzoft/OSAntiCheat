@@ -9,7 +9,7 @@
     <AssemblyName>OSAntiCheat</AssemblyName>
     <!-- Stay below 0.10 until the OSBase package manager compares versions as semver, not strings:
          lexically "0.10.0" < "0.7.0", so a 0.10 release is invisible to the updater. -->
-    <Version>0.9.108</Version>
+    <Version>0.9.109</Version>
     <!-- Required so CounterStrikeSharp can hot-load the plugin assembly -->
     <EnableDynamicLoading>true</EnableDynamicLoading>
   </PropertyGroup>

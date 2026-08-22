@@ -757,7 +757,10 @@ static async Task<(List<PlayerResult> players, List<ShotRow> shots, List<KillRow
     // it lives outside this measurement's domain by construction, which is the point.
     var reactionRows = new List<(int slot, float ms, float flickDeg)>();
     var lastSpottedAt = new Dictionary<(int observer, int victim), float>();   // whole-round memory, beyond the 2s mask ring
-    var headRows = new List<(int slot, float err)>();   // head-center aim error at fire, for the bone-lock floor
+    var headRows = new List<(int slot, float err, bool fresh)>();   // head-center aim error at fire, for the bone-lock floor; fresh = a new acquisition (see lockHold)
+    // Re-acquisition gate (mirrors BoneLockDetector): a lock counts again only once the view has
+    // travelled >= 2deg from the last counted lock. One frozen hold tapped six times is one lock.
+    var lockHold = new Dictionary<int, (int seq, ViewAngles angles, bool departed)>();
     var kills = new List<KillRow>();                    // per-kill components, exported via --kills
     var hurtRows = new List<HurtRow>();                 // per-hurt silent-aim measurement, exported via --hurts
     var spinMax = new Dictionary<int, float>();         // max SUSTAINED yaw rate (deg/s) — raw, gradient alone
@@ -1582,7 +1585,21 @@ static async Task<(List<PlayerResult> players, List<ShotRow> shots, List<KillRow
             headTgt.TryLatest(out var headSample) && headSample.Alive)
         {
             headErr = Geometry.AimErrorTo(eye, atFire.Angles, headSample.Origin + new Vector3(0f, 0f, 64f));
-            headRows.Add((slot, headErr));
+            bool fresh = true;
+            if (lockHold.TryGetValue(slot, out var hold))
+            {
+                if (!hold.departed)
+                    for (int ago = 0; ago < shooterTracker.Count; ago++)
+                    {
+                        var t = shooterTracker[ago];
+                        if (t.Sequence <= hold.seq) break;
+                        if (Geometry.AngleBetween(hold.angles, t.Angles) >= 2f) { hold.departed = true; break; }
+                    }
+                lockHold[slot] = hold;
+                fresh = hold.departed;
+            }
+            if (headErr <= 0.05f && fresh) lockHold[slot] = (atFire.Sequence, atFire.Angles, false);
+            headRows.Add((slot, headErr, fresh));
         }
 
         // Spinbot signature (owner's insight): a HIT while SPINNING. A human warmup-360 sweeps the
@@ -2268,9 +2285,11 @@ static async Task<(List<PlayerResult> players, List<ShotRow> shots, List<KillRow
                                     .OrderBy(g => g.Select(r => r.err).OrderBy(x => x).ElementAt(g.Count() / 2)))
         {
             var s = grp.Select(r => r.err).OrderBy(x => x).ToList();
-            int spike = s.Count(e => e <= 0.05f);
+            int spike = grp.Count(r => r.err <= 0.05f && r.fresh);
+            int held = grp.Count(r => r.err <= 0.05f && !r.fresh);
             Console.WriteLine($"    {names.GetValueOrDefault(grp.Key, "?"),-20} n={s.Count,4}  median {s[s.Count / 2],5:F2}deg  " +
                               $"p10 {s[(int)(0.1 * (s.Count - 1))],5:F2}deg  min {s[0],5:F3}deg  spike<=0.05: {spike}" +
+                              (held > 0 ? $" (+{held} same-hold taps)" : "") +
                               (spike >= 3 ? "   <- BONE-LOCK?" : ""));
         }
     }
@@ -2302,7 +2321,7 @@ static async Task<(List<PlayerResult> players, List<ShotRow> shots, List<KillRow
         maxFollowTick.GetValueOrDefault(kv.Key),
         killWallMax.GetValueOrDefault(kv.Key),
         headRows.Count(r => r.slot == kv.Key),
-        headRows.Count(r => r.slot == kv.Key && r.err <= 0.05f),
+        headRows.Count(r => r.slot == kv.Key && r.err <= 0.05f && r.fresh),
         spinMax.GetValueOrDefault(kv.Key),
         spinHits.GetValueOrDefault(kv.Key),
         spinHsKills.GetValueOrDefault(kv.Key),
