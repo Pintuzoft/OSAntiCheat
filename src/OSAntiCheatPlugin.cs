@@ -127,6 +127,9 @@ public sealed class OSAntiCheatPlugin : BasePlugin, IPluginConfig<OSAntiCheatCon
             DecayTau = config.DecayTau,
             CorroborationWindow = config.CorroborationWindow,
             CorroborationBonus = config.CorroborationBonus,
+            CorroborateOnly = config.AimDriftCorroborateOnly
+                ? new HashSet<string> { "aim.drift" }
+                : new HashSet<string>(),
         });
 
         // Build detectors with the configured sensitivity so thresholds are tunable per server.

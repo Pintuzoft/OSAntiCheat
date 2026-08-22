@@ -15,7 +15,7 @@ public sealed class OSAntiCheatConfig : BasePluginConfig
     // below. Pinned server values must therefore live in OSAntiCheat.local.json (the overlay, v0.9.97),
     // which regeneration never touches. After any schema-bump release: verify the overlay file exists
     // and that the load log shows its keys applied.
-    public override int Version { get; set; } = 26;
+    public override int Version { get; set; } = 27;
 
     /// <summary>
     /// Include bots as detection subjects. Bots have perfect server-driven aim so they trip the
@@ -373,6 +373,19 @@ public sealed class OSAntiCheatConfig : BasePluginConfig
     /// <summary>Fusion weight. Corroborating axis — same tier as the null test, never a verdict.</summary>
     [JsonPropertyName("AimDriftWeight")]
     public float AimDriftWeight { get; set; } = 0.5f;
+
+    /// <summary>
+    /// True (default) = aim.drift may CORROBORATE but never CARRY a tier: its fusion score stays in
+    /// a dormant bucket that only counts while another detector's score is alive for the same
+    /// player, and then for at most as much as that detector earned (drift can double a case,
+    /// never build one). Live lesson (v0.9.107, 16–21 Aug): rising z bands alone (0.4+0.5+…+0.8 × 0.5 = 1.5)
+    /// whispered Watch on eight different regulars in six nights — two of them admins reading their
+    /// own notice — because the honest tail of this axis is population-wide, so "sustained" is not
+    /// evidence by itself. C8/C9 lose nothing: their drift landed next to nulltest/track/bonelock,
+    /// and there it still adds. False = the old behaviour (drift alone can reach Watch).
+    /// </summary>
+    [JsonPropertyName("AimDriftCorroborateOnly")]
+    public bool AimDriftCorroborateOnly { get; set; } = true;
 
     /// <summary>Headshot kills landed mid-spin before the spin-hs-kill edge fires. The first is always
     /// silent at 2 (a lucky HS mid-trickshot-360 is a fluke, not a bot); a spinbot re-qualifies every

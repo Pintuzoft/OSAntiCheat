@@ -4,6 +4,27 @@ Version history for OSAntiCheat, newest first. Every release gets an entry here;
 describes the current state only. Player/admin names follow the pseudonym scheme from
 [TODO.md](TODO.md) (Cn = typed cheater, Gn = griefer, Rn = regular, An = admin).
 
+## v0.9.108 — drift may double a case, never build one (twelve regulars whispered)
+
+Six nights of v0.9.107 produced nine whispers; eight were aim.drift ALONE on eight different
+regulars (two of them admins, reading their own notice), and the log holds twelve such solo-drift
+Watches since the axis went live 10 Aug — every one a known regular, not one of them a cheater.
+The axis's honest tail is population-wide: since 16 Aug it signalled on 55 different players, and
+a regular climbing z bands 3→7 inside one map (0.4+0.5+0.6+0.7+0.8 × 0.5 = 1.5) is over Watch
+with nobody else speaking. "Sustained" turned out not to be evidence on its own.
+
+- **Fusion gains a corroborate-only bucket** (`SuspicionConfig.CorroborateOnly`). A listed
+  detector's score never carries a tier: it sits dormant until some carrying axis has a live
+  (decayed) score for the same player, and then counts for AT MOST as much as those axes earned
+  themselves — it can double a case, never build one. `AimDriftCorroborateOnly` (default true)
+  puts aim.drift there. Schema v27.
+- Replaying the log's signals through the live fusion reproduces all 21 alerts since 10 Aug 1:1
+  (same players, same scores). Under the new rule: 9. The twelve solo-drift whispers vanish,
+  nothing new appears, C9's killburst+drift Watch (14 Aug) fires in the same second with the
+  same score, and MrJozk's bonelock Watch→Review (20 Aug) is untouched — bonelock carries alone.
+- The whisper chain for drift now reads as designed: the axis corroborates a wall/aim case that
+  another detector opened, exactly as it did next to C8's track kills and C9's killburst.
+
 ## v0.9.107 — the whisper learns what a script is for (first verified airgain FP)
 
 An R1 hit Review on movement.airgain alone (2026-08-15 de_vandal) and the demo proves him

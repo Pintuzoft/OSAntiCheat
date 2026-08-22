@@ -22,6 +22,20 @@ public sealed record SuspicionConfig
 
     public float WatchThreshold { get; init; } = 1.0f;
     public float ReviewThreshold { get; init; } = 2.5f;
+
+    /// <summary>
+    /// Detectors that may CORROBORATE but never CARRY: their score sits in a separate bucket that
+    /// only counts toward the tier while some other detector's (decayed) score is still alive for
+    /// that player (≥ <see cref="CorroborationFloor"/>) — and then for AT MOST as much as those
+    /// carrying axes earned themselves (it can double a case, never build one). Alone, however
+    /// many bands they climb, the player stays at None. For axes whose honest tail is
+    /// population-wide (aim.drift: 8 regulars whispered solo in 6 nights, v0.9.107) so that
+    /// "sustained" is not evidence on its own.
+    /// </summary>
+    public IReadOnlySet<string> CorroborateOnly { get; init; } = new HashSet<string>();
+
+    /// <summary>Decayed non-latent score below which a corroborate-only bucket stays dormant.</summary>
+    public float CorroborationFloor { get; init; } = 0.1f;
 }
 
 /// <summary>Emitted when a player crosses into a higher tier, carrying context for review.</summary>
@@ -65,6 +79,8 @@ public sealed class SuspicionEngine
         float dt = signal.Time - st.LastUpdate;
         if (dt > 0f)
             st.Score *= MathF.Exp(-dt / _config.DecayTau);
+        if (dt > 0f)
+            st.LatentScore *= MathF.Exp(-dt / _config.DecayTau);
         st.LastUpdate = signal.Time;
 
         // Keep only signals within the corroboration window, then add this one.
@@ -77,14 +93,19 @@ public sealed class SuspicionEngine
         int distinctDetectors = CountDistinctDetectors(st.Recent);
         float corroboration = 1f + _config.CorroborationBonus * (distinctDetectors - 1);
 
-        st.Score += weight * Math.Clamp(signal.Confidence, 0f, 1f) * corroboration;
+        float add = weight * Math.Clamp(signal.Confidence, 0f, 1f) * corroboration;
+        if (_config.CorroborateOnly.Contains(signal.Detector))
+            st.LatentScore += add;
+        else
+            st.Score += add;
 
-        var tier = TierFor(st.Score);
+        float effective = Effective(st);
+        var tier = TierFor(effective);
         if (tier > st.Tier)
         {
             st.Tier = tier;
             TierRaised?.Invoke(new SuspicionAlert(
-                signal.PlayerSlot, tier, st.Score, signal.Time, st.Recent.ToArray()));
+                signal.PlayerSlot, tier, effective, signal.Time, st.Recent.ToArray()));
         }
         else if (tier < st.Tier)
         {
@@ -98,8 +119,16 @@ public sealed class SuspicionEngine
     {
         if (!_state.TryGetValue(slot, out var st)) return 0f;
         float dt = now - st.LastUpdate;
-        return dt > 0f ? st.Score * MathF.Exp(-dt / _config.DecayTau) : st.Score;
+        float k = dt > 0f ? MathF.Exp(-dt / _config.DecayTau) : 1f;
+        return Effective(st.Score * k, st.LatentScore * k);
     }
+
+    private float Effective(PlayerState st) => Effective(st.Score, st.LatentScore);
+
+    /// <summary>Latent (corroborate-only) score counts only while a carrying axis is still alive,
+    /// and then at most doubles it — amplification, never a case of its own.</summary>
+    private float Effective(float score, float latent) =>
+        score >= _config.CorroborationFloor ? score + MathF.Min(latent, score) : score;
 
     public void Remove(int slot) => _state.Remove(slot);
 
@@ -120,7 +149,8 @@ public sealed class SuspicionEngine
 
     private sealed class PlayerState
     {
-        public float Score;
+        public float Score;        // carrying detectors
+        public float LatentScore;  // corroborate-only detectors — dormant until Score is alive
         public float LastUpdate;
         public SuspicionTier Tier;
         public readonly List<Signal> Recent = new();
