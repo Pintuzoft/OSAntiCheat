@@ -9,11 +9,13 @@ namespace OSAntiCheat.Tests;
 
 /// <summary>
 /// movement.airgain is a LOGIC-BREACH movement axis: horizontal speed gained WHILE AIRBORNE,
-/// sustained across a chain of jumps. Corpus (43 demos, 261 honest sessions with ≥4 chained
-/// arcs): honest median gain max +14.3 u/s — downhill hop bursts live there and die by the
-/// third hop; C9's bhop script held +67 median at over-sprint peaks. These tests model the
-/// shapes on synthetic ticks: a scripted chain fires the edge, downhill bursts and single big
-/// jumps stay silent, and a surf ride (one long airborne phase) is structurally invisible.
+/// sustained across a chain of jumps. Corpus (43 demos, 5-arc windows): honest median gain max
+/// +21 u/s — downhill hop bursts live there and die by the third hop; live hands launching from
+/// a sprint reach +39 at median peaks ≤280 (seven whispers on five regulars, Aug–Sep 2026);
+/// C9's bhop script held +71 median at 300–400 peaks. These tests model the shapes on synthetic
+/// ticks: a scripted chain fires the edge, downhill bursts, human sprint-launch chains and
+/// single big jumps stay silent, an over-sprint chain whispers without ever carrying a tier,
+/// and a surf ride (one long airborne phase) is structurally invisible.
 /// </summary>
 public class MovementAirGainDetectorTests
 {
@@ -200,23 +202,71 @@ public class MovementAirGainDetectorTests
     }
 
     [Fact]
-    public void Sub_sprint_chain_whispers_without_the_edge()
+    public void Over_sprint_chain_whispers_without_the_edge()
     {
-        // Median gain over the whisper bar but peaks under 300 u/s: fusion food, no auto-action.
+        // The auto-bunnyhop-only shape (owner's live test, 2026-08-15: +31 median, peak 298):
+        // perfect re-jump timing, human strafing. Over the human peak band (≤280) but under the
+        // edge on both counts (+40 / 300): fusion food, no auto-action.
         var d = new MovementAirGainDetector();
         var tr = new PlayerTracker(4096, slot: 1);
-        FeedGround(tr, 20, 240f);
+        FeedGround(tr, 20, 267f);
         Signal? sig = null;
         float t = 0;
         for (int hop = 0; hop < 6; hop++)
         {
-            t = FeedHop(tr, 240f, 30f);          // +30 median, peak 270 < 300
-            t = FeedGround(tr, 4, 240f);
+            t = FeedHop(tr, 267f, 31f);          // +31 median, peak 298: ≥290 whisper, <300 edge
+            t = FeedGround(tr, 4, 267f);
             sig = Drain(d, tr, t) ?? sig;
         }
         Assert.NotNull(sig);
         Assert.Null(sig!.Value.Edge);
-        Assert.InRange(sig.Value.Confidence, 0.4f, 0.85f);
+        Assert.InRange(sig.Value.Confidence,
+            MovementAirGainDetector.WhisperConfidenceFloor, MovementAirGainDetector.WhisperConfidenceCeiling);
+    }
+
+    [Fact]
+    public void Human_sprint_launch_chain_stays_silent()
+    {
+        // The three live Watch alerts on one R1 (2026-08-29 ×2, 09-04) and four more regulars:
+        // 5–8 chained hops from ~225 u/s launches, +25…+39 median gain, median peaks 258–280.
+        // A hand air-strafing from a sprint launch lands here; the whisper's peak floor (290)
+        // must keep the whole band silent — it was the gain gate alone that let it through.
+        var d = new MovementAirGainDetector();
+        var tr = new PlayerTracker(4096, slot: 1);
+        FeedGround(tr, 20, 224f);
+        Signal? sig = null;
+        float t = 0;
+        for (int hop = 0; hop < 6; hop++)
+        {
+            t = FeedHop(tr, 224f, 36f);          // the 09-04 signal: +36 median, peak 260
+            t = FeedGround(tr, 4, 224f);
+            sig = Drain(d, tr, t) ?? sig;
+        }
+        Assert.Null(sig);
+    }
+
+    [Fact]
+    public void Whisper_never_carries_a_watch_alone()
+    {
+        // The strongest whisper there is — gain one u/s under the edge, peaks over 300 — must
+        // still fuse below Watch on its own: confidence × weight < the Watch threshold. It can
+        // double a case another axis opened; it cannot build one.
+        var d = new MovementAirGainDetector();
+        var tr = new PlayerTracker(4096, slot: 1);
+        FeedGround(tr, 20, 262f);
+        Signal? sig = null;
+        float t = 0;
+        for (int hop = 0; hop < 6; hop++)
+        {
+            t = FeedHop(tr, 262f, 39f);          // +39 median (< edge 40), peak 301 (≥ edge 300)
+            t = FeedGround(tr, 4, 262f);
+            sig = Drain(d, tr, t) ?? sig;
+        }
+        Assert.NotNull(sig);
+        Assert.Null(sig!.Value.Edge);
+        Assert.InRange(sig.Value.Confidence, 0.58f, MovementAirGainDetector.WhisperConfidenceCeiling);
+        Assert.True(sig.Value.Confidence * d.Weight < new SuspicionConfig().WatchThreshold,
+            "a whisper must not reach Watch by itself");
     }
 
     [Fact]
@@ -249,13 +299,13 @@ public class MovementAirGainDetectorTests
         // would let fusion count one event three times (that R1 reached Review exactly this way).
         var d = new MovementAirGainDetector();
         var tr = new PlayerTracker(65536, slot: 1);
-        FeedGround(tr, 20, 240f);
+        FeedGround(tr, 20, 267f);
         Signal? first = null;
         float t = 0;
         for (int hop = 0; hop < 6; hop++)
         {
-            t = FeedHop(tr, 240f, 30f);          // whisper territory: +30 median, peak 270
-            t = FeedGround(tr, 4, 240f);
+            t = FeedHop(tr, 267f, 31f);          // whisper territory: +31 median, peak 298
+            t = FeedGround(tr, 4, 267f);
             first = Drain(d, tr, t) ?? first;
         }
         Assert.NotNull(first);
@@ -277,13 +327,13 @@ public class MovementAirGainDetectorTests
         // a stale re-read) fires again after the cooldown — two bursts in 90 s remain suspicious.
         var d = new MovementAirGainDetector();
         var tr = new PlayerTracker(65536, slot: 1);
-        FeedGround(tr, 20, 240f);
+        FeedGround(tr, 20, 267f);
         Signal? first = null;
         float t = 0;
         for (int hop = 0; hop < 6; hop++)
         {
-            t = FeedHop(tr, 240f, 30f);
-            t = FeedGround(tr, 4, 240f);
+            t = FeedHop(tr, 267f, 31f);
+            t = FeedGround(tr, 4, 267f);
             first = Drain(d, tr, t) ?? first;
         }
         Assert.NotNull(first);
@@ -291,8 +341,8 @@ public class MovementAirGainDetectorTests
         Signal? second = null;
         for (int hop = 0; hop < 3; hop++)
         {
-            t = FeedHop(tr, 240f, 30f);
-            t = FeedGround(tr, 4, 240f);
+            t = FeedHop(tr, 267f, 31f);
+            t = FeedGround(tr, 4, 267f);
             second = Drain(d, tr, t) ?? second;
         }
         Assert.NotNull(second);

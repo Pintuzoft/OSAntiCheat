@@ -4,6 +4,41 @@ Version history for OSAntiCheat, newest first. Every release gets an entry here;
 describes the current state only. Player/admin names follow the pseudonym scheme from
 [TODO.md](TODO.md) (Cn = typed cheater, Gn = griefer, Rn = regular, An = admin).
 
+## v0.9.110 — the whisper stays a whisper (three Watches on one regular)
+
+movement.airgain's whisper carried three Watch alerts on the same regular (2026-08-29 ×2,
+09-04) and sub-Watch signals on four more regulars in the same fortnight — seven signals, five
+known regulars, no cheater. Every one passed both v0.9.107 gates correctly: 5–8 chained hops,
+median gain +25…+39, median peak 258–280. Two things were wrong, neither of them the arcs:
+
+- **The peak floor sat inside the human band.** 250 was chosen as the sprint cap ("a script
+  bhops to go faster than running"). True below sprint — the R1's slow-hop FP peaked at 216 —
+  but a hand that launches FROM a sprint air-strafes above it too, to 258–280. The script band
+  starts at 300 (C9: 300–400 at +71 median). `AirGainSignalMinPeakSpeed` 250 → **290**: above
+  every human chain measured, under the one auto-bunnyhop-only run on record (298 — perfect
+  re-jump timing, human strafing).
+- **The whisper could carry a Watch alone.** Confidence spanned 0.5–0.8 over gains +25…+40;
+  times the axis's 1.5 fusion weight, every chain past +33 median scored ≥1.0 = Watch with
+  nobody else speaking. The 09-04 alert was 1.08 from airgain plus 0.02 of decayed drift — no
+  doubling involved. The span is now **0.40–0.60** (≤0.90 fused): a whisper doubles a case
+  another axis opened, it never builds one — the rule drift got in v0.9.108, applied to the
+  detector that was being called a whisper. The edge (0.95 → 1.43 fused) still alerts red by
+  itself.
+
+Replaying the log's airgain signals through the new gates: the seven regular chains are silent
+and the only survivor is the owner's own auto-bunnyhop test (+31 at 298 → 0.48, 0.72 fused, no
+tier). Both alerts airgain has carried alone since v0.9.107 (08-29, 09-04) vanish, nothing new
+appears. C9's shape (+80 at 380, 3–4-hop bursts) still fires the edge in both edge tests, untouched.
+
+Two new tests model the live band (a +36/260 chain from a 224 u/s launch stays silent) and pin
+the carry rule (the strongest possible whisper, +39 at 301, fuses under Watch); the over-sprint
+whisper test now uses the auto-bunnyhop shape. Reason strings drop "honest corpus max +21" for
+the live band. Noted, not changed: the edge's gain gate (+40) now sits only just above the best
+live hand (+39) — its beyond-human margin is the conjunction with the 300 u/s peak gate (hands:
+280). It stays latent (dry-run) as before.
+
+Config schema v28 → v29 (one default changed). 130 tests.
+
 ## v0.9.109 — one hold is one lock (first bonelock Review was a wallbang)
 
 aimbot.bonelock's first live Review (2026-08-20 de_canals, a regular, "5 head-centre locks ≤0.050°,

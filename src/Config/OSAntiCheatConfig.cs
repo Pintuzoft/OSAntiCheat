@@ -15,7 +15,7 @@ public sealed class OSAntiCheatConfig : BasePluginConfig
     // below. Pinned server values must therefore live in OSAntiCheat.local.json (the overlay, v0.9.97),
     // which regeneration never touches. After any schema-bump release: verify the overlay file exists
     // and that the load log shows its keys applied.
-    public override int Version { get; set; } = 28;
+    public override int Version { get; set; } = 29;
 
     /// <summary>
     /// Include bots as detection subjects. Bots have perfect server-driven aim so they trip the
@@ -208,8 +208,8 @@ public sealed class OSAntiCheatConfig : BasePluginConfig
     /// <summary>
     /// Bunnyhop/strafe script (movement.airgain): horizontal speed gained WHILE AIRBORNE across a
     /// chain of jumps. The engine clamps takeoff speed but air-strafe physics after the clamp is
-    /// shared — a bot syncing strafe+yaw per tick pumps back ~50–100 u/s per hop (C9: +71 windowed median,
-    /// honest windowed max +21). Surf is structurally excluded (a ramp ride is one
+    /// shared — a bot syncing strafe+yaw per tick pumps back ~50–100 u/s per hop (C9: +71 windowed median;
+    /// honest windowed max +21 in the corpus, +39 live from a sprint launch). Surf is structurally excluded (a ramp ride is one
     /// long airborne phase, not a chain of jump arcs). The stack's only movement axis — fully
     /// independent corroboration for the wall/aim cheats bhop ships with.
     /// </summary>
@@ -220,19 +220,27 @@ public sealed class OSAntiCheatConfig : BasePluginConfig
     /// reach +33.5 median honestly (one lucky downhill run); five-arc windows top out at +21.0.</summary>
     public int AirGainMinArcs { get; set; } = 5;
 
-    /// <summary>Median air gain (u/s per hop) for the fusion whisper. Honest windowed max: 21.0.</summary>
+    /// <summary>Median air gain (u/s per hop) for the fusion whisper. Honest corpus windowed max 21.0 —
+    /// but live hands air-strafing from a sprint launch reach +39 (v0.9.110), so on its own this gate
+    /// sits inside the human band; the peak gate below is the discriminator.</summary>
     public float AirGainSignalMedianGain { get; set; } = 25f;
 
-    /// <summary>Median per-arc peak speed (u/s) the whisper also demands. Sprint cap is 250: a
-    /// script bhops to go FASTER than running, so a chain whose peaks stay under sprint speed is a
-    /// hand losing speed to its landings and strafing some back — verified human on a live FP
-    /// (2026-08-15 de_vandal: median gain +37 but median peak 216, an R1 slow-hopping).</summary>
-    public float AirGainSignalMinPeakSpeed { get; set; } = 250f;
+    /// <summary>Median per-arc peak speed (u/s) the whisper also demands. Sprint is 250 and a chain
+    /// whose peaks stay under it is a hand losing speed to its landings and strafing some back
+    /// (2026-08-15 de_vandal: median gain +37 but median peak 216, an R1 slow-hopping — demo-verified).
+    /// But a hand launching FROM a sprint air-strafes above it too: seven live whispers on five
+    /// regulars (2026-08-26 → 09-07) chained 5–8 hops at +25…+39 median gain and 258–280 median
+    /// peak, three of them Watch alerts on one R1 — every one a known regular. The tick-synced
+    /// script flies at 300–400 (C9). 290 sits above every human chain measured and under the one
+    /// auto-bunnyhop-only run on record (298: perfect re-jump timing, human strafing).</summary>
+    public float AirGainSignalMinPeakSpeed { get; set; } = 290f;
 
     /// <summary>Chained arcs needed for the auto-action edge (a downhill burst dies by hop three).</summary>
     public int AirGainEdgeMinArcs { get; set; } = 5;
 
-    /// <summary>Median air gain (u/s per hop) for the edge — ~3× the honest maximum ever measured.</summary>
+    /// <summary>Median air gain (u/s per hop) for the edge — 2× the honest corpus maximum (+21), but only
+    /// just above the best live hand (+39, v0.9.110): the edge's beyond-human margin lives in its
+    /// CONJUNCTION with the 300 u/s peak gate (hands top out at 280). C9's script: +71 median.</summary>
     public float AirGainEdgeMedianGain { get; set; } = 40f;
 
     /// <summary>Median per-arc peak speed (u/s) the edge also demands. Sprint cap is 250.</summary>
