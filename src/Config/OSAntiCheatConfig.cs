@@ -15,7 +15,7 @@ public sealed class OSAntiCheatConfig : BasePluginConfig
     // below. Pinned server values must therefore live in OSAntiCheat.local.json (the overlay, v0.9.97),
     // which regeneration never touches. After any schema-bump release: verify the overlay file exists
     // and that the load log shows its keys applied.
-    public override int Version { get; set; } = 29;
+    public override int Version { get; set; } = 30;
 
     /// <summary>
     /// Include bots as detection subjects. Bots have perfect server-driven aim so they trip the
@@ -106,8 +106,9 @@ public sealed class OSAntiCheatConfig : BasePluginConfig
     /// (repeated in-game renames — nick-changer; the one non-physics edge, gated at measured-zero:
     /// no honest player held two names within a session across 910 logged sessions, remove it here
     /// if your population jokes with renames), "blind-hs-burst" (≥ KillBurstMinKills headshot kills
-    /// inside KillBurstWindowSeconds on DISTINCT enemies the killer never once saw this map — the
-    /// wall+aim ace signature; 2 bursts of ≥4 in 321k archive kills, both confirmed cheaters).
+    /// inside KillBurstWindowSeconds on DISTINCT enemies the killer had not seen for
+    /// KillBurstBlindAfterSeconds or ever this map — the wall+aim ace signature; 3 such bursts of
+    /// ≥4 in 42,342 archive attacker-sessions, all three confirmed cheaters).
     /// The poll-based continuous-spin and yaw-jitter
     /// signals carry no edge by design — strong, but log+fusion-only until they earn the same bar.
     /// </summary>
@@ -346,10 +347,20 @@ public sealed class OSAntiCheatConfig : BasePluginConfig
     [JsonPropertyName("EnableKillBurst")]
     public bool EnableKillBurst { get; set; } = true;
 
-    /// <summary>Distinct never-seen headshot victims inside the window before the blind-hs-burst
+    /// <summary>Distinct blind headshot victims inside the window before the blind-hs-burst
     /// edge fires. Honest archive maximum: 3 (pistol rounds). Do not lower to 3.</summary>
     [JsonPropertyName("KillBurstMinKills")]
     public int KillBurstMinKills { get; set; } = 4;
+
+    /// <summary>Seconds after the attacker's last sighting of a victim before that victim counts as
+    /// blind again (v0.9.112). A minute-old glimpse does not place a moving enemy behind a wall:
+    /// the first live wall+aim case whose burst the strict "never seen" rule counted as one had its
+    /// three victims last seen 64 s, 147 s and never before. Measured on 42,342 archive
+    /// attacker-sessions: ≥3 distinct victims under this rule = 19 sessions (0.04% honest),
+    /// ≥4 = 3 sessions, all typed cheaters. The 2-victim early warning ignores this and still
+    /// demands never-seen victims.</summary>
+    [JsonPropertyName("KillBurstBlindAfterSeconds")]
+    public float KillBurstBlindAfterSeconds { get; set; } = 30f;
 
     /// <summary>Rolling window (seconds) the blind-HS burst is evaluated over. The measured C8 ace
     /// put its 4th distinct blind HS 4.8 s after the first; both archive cheater bursts fit well

@@ -159,7 +159,7 @@ public sealed class OSAntiCheatPlugin : BasePlugin, IPluginConfig<OSAntiCheatCon
             weight: config.NullTestWeight,
             minPopObservations: config.NullTestMinPopObservations);
         _killBurst = new KillBurstDetector(
-            config.KillBurstMinKills, config.KillBurstWindowSeconds);
+            config.KillBurstMinKills, config.KillBurstWindowSeconds, config.KillBurstBlindAfterSeconds);
         _aimDrift = new AimDriftDetector(
             config.AimDriftMinSteps, config.AimDriftMinZ,
             config.AimDriftMinPopSteps, config.AimDriftWeight);
@@ -661,9 +661,9 @@ public sealed class OSAntiCheatPlugin : BasePlugin, IPluginConfig<OSAntiCheatCon
                 bool spottedByObserver = (mask[slot / 32] & (1u << (slot % 32))) != 0;
                 if (spottedByObserver)
                 {
-                    // Whole-map sight memory for the blind-HS-burst edge: one legitimate sighting
-                    // permanently disqualifies this victim for this attacker.
-                    if (Config.EnableKillBurst) _killBurst.NoteSeen(slot, enemy.Slot);
+                    // Sight memory for the blind-HS-burst edge: a recent sighting disqualifies this
+                    // victim for this attacker; one older than KillBurstBlindAfterSeconds goes stale.
+                    if (Config.EnableKillBurst) _killBurst.NoteSeen(slot, enemy.Slot, now);
                     continue; // legitimately seen — not a wallhack candidate
                 }
 

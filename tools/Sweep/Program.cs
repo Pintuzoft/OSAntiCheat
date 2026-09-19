@@ -39,6 +39,7 @@ if (args.Length < 1)
 Combo? evalCombo = null;
 string? bakesDir = null;
 string? geoDumpPath = null;
+string? traceDumpPath = null;
 float[] minMoves = [];
 var inputs = new List<string>();
 for (int i = 0; i < args.Length; i++)
@@ -67,6 +68,14 @@ for (int i = 0; i < args.Length; i++)
         geoDumpPath = args[++i];
         continue;
     }
+    // --trace-dump <path>  => write EVERY parsed observation (one row per player per 50 ms poll,
+    // candidate or not) as TSV, so a gaze/dwell analysis can be run outside the detector's own
+    // gates — what did the crosshair do around unspotted enemies at ANY cone up to 25°?
+    if (args[i] == "--trace-dump" && i + 1 < args.Length)
+    {
+        traceDumpPath = args[++i];
+        continue;
+    }
     inputs.Add(args[i]);
 }
 
@@ -79,6 +88,22 @@ foreach (var arg in inputs)
         cases.Add(await LoadCase(arg[..sep], cid, bakesDir));
     else
         cases.Add(await LoadCase(arg, 0, bakesDir));
+}
+
+if (traceDumpPath is not null)
+{
+    using var td = new StreamWriter(traceDumpPath);
+    td.WriteLine("demo\tplayer\tsteamid\tslot\ttime\tenemyId\taimErr\tviewYaw\tbearingYaw\tgeoBlocked\tteamUnspotted\tenemySpeed\teyeX\teyeY\teyeZ\tenemyX\tenemyY\tenemyZ");
+    foreach (var k in cases)
+        foreach (var (slot, obs) in k.BySlot)
+        {
+            string name = k.Names.GetValueOrDefault(slot, "?");
+            ulong sid = k.SteamIds.GetValueOrDefault(slot);
+            foreach (var o in obs)
+                td.WriteLine($"{Path.GetFileName(k.Demo)}\t{name}\t{sid}\t{slot}\t{o.Time:F2}\t{o.EnemyId}\t{o.AimErr:F2}\t{o.ViewYaw:F1}\t{o.BearingYaw:F1}\t" +
+                             $"{(o.GeoBlocked ? 1 : 0)}\t{(o.TeamUnspotted ? 1 : 0)}\t{o.EnemySpeed:F0}\t{o.Eye.X:F0}\t{o.Eye.Y:F0}\t{o.Eye.Z:F0}\t{o.EnemyPos.X:F0}\t{o.EnemyPos.Y:F0}\t{o.EnemyPos.Z:F0}");
+        }
+    Console.WriteLine($"  trace dumped to {traceDumpPath}");
 }
 
 if (evalCombo is { } ec)

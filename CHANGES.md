@@ -4,6 +4,49 @@ Version history for OSAntiCheat, newest first. Every release gets an entry here;
 describes the current state only. Player/admin names follow the pseudonym scheme from
 [TODO.md](TODO.md) (Cn = typed cheater, Gn = griefer, Rn = regular, An = admin).
 
+## v0.9.112 — a minute-old glimpse is not sight (the tenth typed cheater walked through)
+
+The same log that carried the mouse swipe carried a real one: a fresh account, two maps,
+seventeen kills and two deaths in 5.6 alive-minutes, admin-kicked after eleven minutes
+(2026-09-18, the owner's label: wall + aim). The plugin raised nothing. What it held: aim.drift
+climbing z 3.8→6.1 in 96 s (corroborate-only since v0.9.108), the null test at z=11 within 144 s
+of the second map (shadow, and 75% present-rate is rank 78 of 2,497 live sessions — regulars get
+there too), and ONE blind headshot from killburst in a round-3 spree of three in 8.5 s: the other
+two victims had been in the killer's spotted mask 64 s and 147 s earlier, so the strict "never
+seen this map" rule let them explain a headshot they could not have placed.
+
+Both demos replayed offline: no signal on any axis (head error median 1.5–1.9°, no lock, no snap,
+silent max 3.7°, null-test ratio 1.10). The crosshair told nothing either: blind-gaze share on
+team-unspotted enemies at every cone from 5° to 25° sits mid-lobby, follow episodes on unseen
+movers 1.8–3.2/min against a lobby of 1.4–4.7, and the parameter sweep ranks him first in both
+matches only by margins a 2.8-minute sample cannot carry. The owner's spectator recordings agree:
+the crosshair is not glued to silhouettes behind walls; the information is used to be in the
+right place and to fire the instant a target appears. This archetype (C2, C8, now C10) leaves
+one measurable trace — lethality: 57% and 53% of shots hit at 2.5 and 3.6 kills per alive-minute.
+Among 40,119 archive sessions with ≥40 shots and ≥2.5 alive-minutes, ZERO combine ≥50% with
+≥2.0 (the 99.9th percentiles are 0.53 and 2.51 separately). Noted as the next axis; not built.
+
+- **Sightings go stale.** `KillBurstBlindAfterSeconds` (default 30): a victim the attacker has
+  not had spotted for that long is blind again. Measured on 42,342 archive attacker-sessions:
+  ≥3 distinct victims under the stale grade in one 15 s window = 19 sessions (2 typed cheaters,
+  0.04% honest), ≥4 = 3 sessions, all three typed cheaters — the edge keeps its floor of four
+  under the looser definition and gains one archive cheater. Across the five labelled demos
+  (C7–C10) the stale grade moves C10 from 1 to 3 and nobody else: C7 1, C8 5, C9 2, honest
+  maximum 2. C10's round 3 would have read "3 headshot kills in 8.5 s on 3 different enemies
+  the killer had not seen for 30 s or ever".
+- **The three-victim tier now carries a Watch on its own** (0.65 × weight 1.6 = 1.04): a lead
+  this rare (one honest session in ~2,500) is worth the yellow "keep an eye on … could be luck"
+  line. The two-victim early warning keeps the strict never-seen grade at 0.4: under the stale
+  grade it would fire in 1.7% of sessions, six times its measured rate, for a whisper whose only
+  job is to double another axis.
+- Sweep gains `--trace-dump <tsv>`: every parsed per-poll observation (nearest unspotted enemy,
+  aim error, team-unspotted flag, speed, positions), so gaze and dwell can be measured outside the
+  detector's own gates. That is how the cone-by-cone table above was produced.
+
+Two new tests: the C10 spree (two stale victims are no warning, the third makes a rare one) and
+the peek kill (a victim sighted at the kill tick neither counts nor breaks, as before). Config
+schema v29 → v30 (one key added). 134 tests.
+
 ## v0.9.111 — a burst is not a spin (the first poll-spin signal was the owner's mouse)
 
 Forty-eight live days without a single spinbot signal, then nine in 1.6 s — on the owner's own

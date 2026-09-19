@@ -40,7 +40,7 @@ public sealed class KillBurstDetectorTests
         // C8's fifth kill was on a victim he had just seen — the ace must still fire on
         // the remaining blind kills, and the sighted one must not inflate the count.
         var d = new KillBurstDetector(minKills: 4, windowSeconds: 15f);
-        d.NoteSeen(observer: 1, enemy: 14);
+        d.NoteSeen(observer: 1, enemy: 14, now: 0f);
         Assert.Null(d.OnKill(1, 10, "A", headshot: true, now: 0f));
         Assert.Null(d.OnKill(1, 14, "Seen", headshot: true, now: 1f));  // sighted: no count, no break
         d.OnKill(1, 11, "B", headshot: true, now: 2f);                  // early warnings (edge-less)
@@ -63,6 +63,43 @@ public sealed class KillBurstDetectorTests
         // A fourth blind HS OUTSIDE the window must not complete the burst (window drained →
         // count restarts at 1 → not even an early warning).
         Assert.Null(d.OnKill(2, 13, "D", headshot: true, now: 40f));
+    }
+
+    [Fact]
+    public void Stale_sighting_counts_as_blind_from_three_victims_but_never_for_two()
+    {
+        // C10 (2026-09-18 blackgold, r3): three headshots in 8.5 s on victims last seen 64 s, 147 s
+        // and never before. Under the strict rule only the third counted; a sighting older than
+        // 30 s is stale and the burst is three. But two stale-sighted victims alone are no warning:
+        // the 2-victim tier keeps the strict "never seen" grade (six times noisier otherwise).
+        var d = new KillBurstDetector(minKills: 4, windowSeconds: 15f, blindAfterSeconds: 30f);
+        d.NoteSeen(observer: 1, enemy: 10, now: 100f);
+        d.NoteSeen(observer: 1, enemy: 11, now: 20f);
+        Assert.Null(d.OnKill(1, 10, "A", headshot: true, now: 164f));   // seen 64 s ago: blind, 1 victim
+        Assert.Null(d.OnKill(1, 11, "B", headshot: true, now: 170f));    // seen 150 s ago: blind, but 2 stale ≠ warning
+        var s3 = d.OnKill(1, 12, "C", headshot: true, now: 172.5f); // never seen: three blind victims
+        Assert.NotNull(s3);
+        Assert.Null(s3!.Value.Edge);
+        Assert.Equal(0.65f, s3.Value.Confidence, 2);
+        Assert.Contains("3 headshot kills", s3.Value.Reason);
+        Assert.Contains("not seen for 30s", s3.Value.Reason);
+        Assert.Contains("A", s3.Value.Reason);
+    }
+
+    [Fact]
+    public void Fresh_sighting_still_neither_counts_nor_breaks()
+    {
+        // The peek kill: the victim became spotted at the kill tick (C10's second pistol-round
+        // headshot, sighted 0.0 s before). A fresh sighting is not blind at any tier.
+        var d = new KillBurstDetector(minKills: 4, windowSeconds: 15f, blindAfterSeconds: 30f);
+        Assert.Null(d.OnKill(1, 10, "A", headshot: true, now: 30f));      // never seen
+        d.NoteSeen(observer: 1, enemy: 11, now: 31.3f);
+        Assert.Null(d.OnKill(1, 11, "Seen", headshot: true, now: 31.3f)); // just sighted: no count, no break
+        var s2 = d.OnKill(1, 12, "B", headshot: true, now: 36f);          // second never-seen: warning
+        Assert.NotNull(s2);
+        Assert.Equal(0.4f, s2!.Value.Confidence, 2);
+        Assert.Contains("never once seen", s2.Value.Reason);
+        Assert.DoesNotContain("Seen", s2.Value.Reason);
     }
 
     [Fact]
@@ -100,7 +137,7 @@ public sealed class KillBurstDetectorTests
         Assert.Null(d.OnKill(1, 13, "D", headshot: false, now: 3f));
 
         // Map change: sight memory and burst state restart with the map.
-        d.NoteSeen(observer: 5, enemy: 10);
+        d.NoteSeen(observer: 5, enemy: 10, now: 99f);
         d.Reset();
         d.OnKill(5, 10, "A", headshot: true, now: 100f);
         d.OnKill(5, 11, "B", headshot: true, now: 101f);

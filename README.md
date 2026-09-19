@@ -72,7 +72,7 @@ auto-action edge, one of them latent (see [Enforcement](#enforcement)); everythi
 | **Silent aim** | A bullet *registers damage* while the view points ≥10° away from every position the victim held in the lag-comp window | Honest burst-opener max: 8.0° (0 of 3,486 ≥10°). Catches both spin-silent and frozen-view psilent |
 | **Anti-recoil** | Recoil compensation too consistent to be human | Human floor ratio ~0.06 across 17k archive sprays |
 | **Anti-aim** | Pitch past the engine's ±89° clamp, or ≥6 consecutive sign-alternating ≥45° yaw jerks | Honest pitch parks at exactly 89.00; honest max alternation: 1 |
-| **Blind headshot burst** (v0.9.92) | ≥4 headshot kills inside 15 s on 4 *different* enemies the killer has never once had spotted on the map | 321k archive kills: exactly 2 such bursts, both typed cheaters. Two blind kills are a 0.4 fusion whisper only (honest sessions reach that ~1.8% of the time) |
+| **Blind headshot burst** (v0.9.92) | ≥4 headshot kills inside 15 s on 4 *different* enemies the killer has not had spotted for 30 s, or ever, on the map | 321k archive kills: exactly 2 such bursts, both typed cheaters. Two blind kills are a 0.4 fusion whisper only (honest sessions reach that ~1.8% of the time) |
 | **Bunnyhop script** (v0.9.101) | Horizontal speed *gained while airborne*, sustained over ≥5 chained jump arcs — the takeoff clamp is the server's, the air-strafe physics after it is shared, and only tick-synced input pumps speed back every hop | Corpus 5-arc windows: max +21 median; live hands launching from a sprint reach +39 at median peaks ≤280 (v0.9.110). The script band: +67…+150 per hop at 300–400. Whisper ≥+25 at ≥290 peak (corroborates, never carries a tier alone); edge ≥+40 at ≥300 |
 
 One further live axis sits *between* the tiers: **Nick-changer** (v0.9.91) — ≥3 in-game renames
@@ -113,9 +113,9 @@ honest baseline:
   Steam renames cannot be executed in 20 s. Remove it from `AutoActionEdges` if your population
   jokes with rapid renames.
 - **`blind-hs-burst`** (v0.9.92) — four headshot kills inside 15 s on four *different* enemies
-  the killer has never once had spotted on the map. The archive's 321k kills hold exactly two
+  the killer has not had spotted for 30 s, or ever, on the map. The archive's 321k kills hold exactly two
   such bursts, both typed cheaters; the first live-caught wall+aim account would have been
-  kicked at kill four of its six-kill ace. Two blind kills are a fusion whisper, never an edge.
+  kicked at kill four of its six-kill ace. Two never-seen kills are a fusion whisper (0.4); three blind kills under the stale-sighting grade (a victim not spotted for `KillBurstBlindAfterSeconds`, 30 s, is blind again — v0.9.112) a rare one (0.65; 19 of 42,342 archive attacker-sessions, 17 honest); never an edge below four.
 - **`airgain-chain`** (v0.9.101) — ≥5 chained jump arcs with median mid-air gain ≥ +40 u/s at
   median peak ≥ 300 u/s. Its response is not the kick but a **freeze**: the pawn is parked in
   place and disarmed for the rest of the round (`AirGainFreezeSeconds`, a public "speeding
