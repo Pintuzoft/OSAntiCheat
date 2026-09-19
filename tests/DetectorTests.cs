@@ -22,24 +22,74 @@ public class DetectorTests
 
     // ---- Spinbot ----------------------------------------------------------
 
-    [Fact]
-    public void Spinbot_flags_continuous_multi_turn_rotation()
+    /// <summary>Feed <paramref name="ticks"/> consecutive samples, turning <paramref name="yawPerTick"/> each.</summary>
+    private static void Spin(PlayerTracker t, ref int seq, ref float time, ref float yaw, int ticks, float yawPerTick)
     {
-        // ~2000°/s for 40 ticks ≈ 1250° = 3.5 continuous turns — a human can't rotate that far unbroken.
-        var t = new PlayerTracker(64, slot: 3);
-        float time = 0f, yaw = 0f;
-        for (int seq = 0; seq < 40; seq++)
+        for (int k = 0; k < ticks; k++, seq++)
         {
             t.Add(Sample(seq, time, Vector3.Zero, new ViewAngles(0f, yaw % 360f, 0f)));
             time += TickDt;
-            yaw += 2000f * TickDt;
+            yaw += yawPerTick;
         }
+    }
 
-        var signal = new SpinbotDetector().Inspect(t);
-        Assert.NotNull(signal);
-        Assert.Equal("spinbot", signal!.Value.Detector);
-        Assert.Null(signal.Value.Edge); // poll-spin fuses but is NOT an auto-action edge
-        Assert.Equal(DetectorKind.LogicBreach, new SpinbotDetector().Kind);
+    [Fact]
+    public void Spinbot_flags_a_spin_that_keeps_going()
+    {
+        // ~2000°/s, unbroken, polled every 0.2 s (13 ticks ≈ 406°) as the buffer fills. The first
+        // stretch past two turns is credited silently (once is a burst); the NEXT two turns on top of
+        // it fire, and every further two turns after that — a spinbot never stops serving.
+        var t = new PlayerTracker(128, slot: 3);
+        var d = new SpinbotDetector();
+        float time = 0f, yaw = 0f; int seq = 0;
+        Signal? first = null; int firstPoll = 0, fired = 0;
+        for (int poll = 1; poll <= 9; poll++)
+        {
+            Spin(t, ref seq, ref time, ref yaw, 13, 2000f * TickDt);
+            if (d.Inspect(t) is { } s) { fired++; if (first is null) { first = s; firstPoll = poll; } }
+        }
+        Assert.NotNull(first);
+        Assert.Equal("spinbot", first!.Value.Detector);
+        Assert.Null(first.Value.Edge); // poll-spin fuses but is NOT an auto-action edge
+        Assert.Equal(DetectorKind.LogicBreach, d.Kind);
+        Assert.Equal(4, firstPoll);     // 812° at poll 2 (silent), 812° more at poll 4 (fires) — 0.8 s in
+        Assert.True(fired >= 3);        // and keeps firing on every fresh two turns
+    }
+
+    [Fact]
+    public void Spinbot_ignores_a_single_multi_turn_burst_that_stops()
+    {
+        // The live false positive (2026-09-10): a hand trying a new mouse driver threw 752° of
+        // same-direction rotation at spin rate in one swipe, then held still. The old poll re-read the
+        // same stretch out of the 2 s buffer nine times (fusion made a Review of the first two). A
+        // stretch that stops is a burst; only a stretch that keeps going is a spin.
+        var t = new PlayerTracker(128, slot: 3);
+        var d = new SpinbotDetector();
+        float time = 0f, yaw = 0f; int seq = 0;
+        Spin(t, ref seq, ref time, ref yaw, 9, 94f);   // 8 deltas × 94° = 752° (~6000°/s), 2.1 turns
+        int signals = 0;
+        for (int poll = 0; poll < 9; poll++)
+        {
+            Spin(t, ref seq, ref time, ref yaw, 13, 0f); // still
+            if (d.Inspect(t) is not null) signals++;
+        }
+        Assert.Equal(0, signals);
+    }
+
+    [Fact]
+    public void Spinbot_does_not_pair_two_bursts_seconds_apart()
+    {
+        // Two driver bursts three seconds apart are two flukes, not a sustained spin: the pair window
+        // (2 s, the buffer's span) has lapsed, so the second is credited as a first again.
+        var t = new PlayerTracker(128, slot: 3);
+        var d = new SpinbotDetector();
+        float time = 0f, yaw = 0f; int seq = 0;
+        int signals = 0;
+        Spin(t, ref seq, ref time, ref yaw, 9, 94f);
+        for (int poll = 0; poll < 15; poll++) { Spin(t, ref seq, ref time, ref yaw, 13, 0f); if (d.Inspect(t) is not null) signals++; } // ~3 s still
+        Spin(t, ref seq, ref time, ref yaw, 9, 94f);
+        for (int poll = 0; poll < 5; poll++) { Spin(t, ref seq, ref time, ref yaw, 13, 0f); if (d.Inspect(t) is not null) signals++; }
+        Assert.Equal(0, signals);
     }
 
     [Fact]

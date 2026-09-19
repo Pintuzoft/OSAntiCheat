@@ -136,7 +136,10 @@ executed or dry-run — is written to the JSON-lines log as a `type:"action"` ro
 signal that caused it. Bots are never acted on, and no probabilistic axis can reach this path:
 the edge whitelist (`AutoActionEdges`) is checked against a field only the edge detectors above
 ever set. The poll-based continuous-spin and yaw-jitter signals deliberately carry **no** edge —
-they fuse toward human review like everything else.
+they fuse toward human review like everything else. The spin poll also needs the spin to *keep
+going*: two full turns are credited silently (a hand can throw that in one swipe at high
+sensitivity — the first live poll-spin signal was exactly that), and only the next two turns
+within 2 s fire. Each stretch of rotation counts once; the 0.2 s poll never re-reads it.
 
 ## History & field results
 

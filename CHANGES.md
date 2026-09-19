@@ -4,6 +4,37 @@ Version history for OSAntiCheat, newest first. Every release gets an entry here;
 describes the current state only. Player/admin names follow the pseudonym scheme from
 [TODO.md](TODO.md) (Cn = typed cheater, Gn = griefer, Rn = regular, An = admin).
 
+## v0.9.111 — a burst is not a spin (the first poll-spin signal was the owner's mouse)
+
+Forty-eight live days without a single spinbot signal, then nine in 1.6 s — on the owner's own
+account (2026-09-10), trying a freshly installed wireless-mouse driver: one swipe of 752° in one
+direction at spin rate, then still. Fusion made a Watch of the first poll and a Review of the
+second, 0.2 s later, and the online admins got the red "impossible spinning" line. No action was
+taken — the poll-spin carries no edge, and the kick edge (a headshot kill landed mid-spin, twice)
+stayed silent, as designed. Two things were wrong, neither of them the 752°:
+
+- **The poll re-read the same stretch nine times.** Every 0.2 s it re-measured the longest run in
+  the 2 s ring buffer, found the same 752° and signalled again; fusion summed the first two into
+  a Review. The rule airgain got in v0.9.107 and bonelock in v0.9.109 now applies here too:
+  ticks credited to a stretch are spent, and the next signal must be rotation newer than its
+  last tick.
+- **Two continuous turns are not beyond a hand.** A high-sensitivity swipe can carry 2.1 turns
+  without a lift; what a hand cannot do is keep going. The poll now credits the first two-turn
+  stretch silently and fires on the NEXT one arriving within 2 s (a bot at the 1000°/s floor
+  serves two turns every 0.72 s; the buffer spans 2 s) — the "once is a fluke, twice is a bot"
+  rule the spin-HS-kill edge has had since v0.9.8. A spinbot at 2000°/s now alerts 0.8 s after it
+  starts instead of 0.4 s; a single swipe, or two swipes seconds apart, never alert.
+
+Replaying the log: the nine signals collapse to zero. The spinbot test now models a spin that
+keeps going (poll 2 silent, poll 4 fires, then every fresh two turns); two new tests pin the
+one-swipe burst and the two-bursts-seconds-apart shape to zero signals. No config change
+(schema stays v29). 132 tests.
+
+Noted, not code: the same log shows movement.airgain whispers at median peaks 252–278 carrying
+v0.9.110's confidence span — the build is live, but the generated server config still holds
+the v28 peak floor (250). A schema bump does not reliably regenerate the file; the 290 floor has
+to be set on the server by hand.
+
 ## v0.9.110 — the whisper stays a whisper (three Watches on one regular)
 
 movement.airgain's whisper carried three Watch alerts on the same regular (2026-08-29 ×2,
