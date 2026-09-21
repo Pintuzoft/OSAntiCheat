@@ -15,7 +15,7 @@ public sealed class OSAntiCheatConfig : BasePluginConfig
     // below. Pinned server values must therefore live in OSAntiCheat.local.json (the overlay, v0.9.97),
     // which regeneration never touches. After any schema-bump release: verify the overlay file exists
     // and that the load log shows its keys applied.
-    public override int Version { get; set; } = 30;
+    public override int Version { get; set; } = 31;
 
     /// <summary>
     /// Include bots as detection subjects. Bots have perfect server-driven aim so they trip the
@@ -108,12 +108,15 @@ public sealed class OSAntiCheatConfig : BasePluginConfig
     /// if your population jokes with renames), "blind-hs-burst" (≥ KillBurstMinKills headshot kills
     /// inside KillBurstWindowSeconds on DISTINCT enemies the killer had not seen for
     /// KillBurstBlindAfterSeconds or ever this map — the wall+aim ace signature; 3 such bursts of
-    /// ≥4 in 42,342 archive attacker-sessions, all three confirmed cheaters).
+    /// ≥4 in 42,342 archive attacker-sessions, all three confirmed cheaters), "silent-far-hs" (head
+    /// hits with a precision weapon at ≥700u while the view sat ≥ SilentAimFarOffDeg off every
+    /// lag-comp position of the victim, on ≥ SilentAimFarMinVictims distinct enemies the same map —
+    /// bullets landing where the view is not; 0 honest sessions of 42,342 hold two).
     /// The poll-based continuous-spin and yaw-jitter
     /// signals carry no edge by design — strong, but log+fusion-only until they earn the same bar.
     /// </summary>
     [JsonPropertyName("AutoActionEdges")]
-    public string[] AutoActionEdges { get; set; } = { "spin-hs-kill", "fake-pitch", "name-churn", "blind-hs-burst" };
+    public string[] AutoActionEdges { get; set; } = { "spin-hs-kill", "fake-pitch", "name-churn", "blind-hs-burst", "silent-far-hs" };
 
     /// <summary>
     /// Command run on a confirmed edge. Placeholders: {slot} {userid} {steamid} {name} {detector}
@@ -185,6 +188,22 @@ public sealed class OSAntiCheatConfig : BasePluginConfig
 
     /// <summary>Off-view hits required before flagging — one can be jump-spread luck or interp noise.</summary>
     public int SilentAimMinHits { get; set; } = 3;
+
+    /// <summary>
+    /// Far-precision grade (v0.9.113): a HEAD hit with a precision weapon (deagle, R8, USP/P2000,
+    /// glock, AWP, scout, autosnipers) at ≥700u counts from this view-off floor instead of
+    /// SilentAimOffDeg. Honest deagle headshot kills at that range: p99 1.94°, p99.9 3.55°, max
+    /// 5.07° (archive6, n=5,362); >4° in 0.07% of them (awp 0 of 1,184). Rifles and spray pistols
+    /// are excluded — their honest far-headshot tails run 4–15% past 4°.
+    /// </summary>
+    [JsonPropertyName("SilentAimFarOffDeg")]
+    public float SilentAimFarOffDeg { get; set; } = 4f;
+
+    /// <summary>Distinct victims of such hits on one map before the "silent-far-hs" edge fires. Two:
+    /// 0 of 42,342 honest archive attacker-sessions (the one session at ≥2 is a typed cheater); one
+    /// is a 0.6 fusion whisper (6 honest sessions, 0.014%).</summary>
+    [JsonPropertyName("SilentAimFarMinVictims")]
+    public int SilentAimFarMinVictims { get; set; } = 2;
 
     /// <summary>
     /// Anti-aim (defensive angle desync): pitch past the engine's ±89° clamp ("standing on their

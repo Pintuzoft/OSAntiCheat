@@ -1138,7 +1138,7 @@ static async Task<(List<PlayerResult> players, List<ShotRow> shots, List<KillRow
             !w.Contains("decoy") && !w.Contains("c4") &&   // explode without aim; 3 bomb hits ≠ 3 off-view bullets
             trackers.TryGetValue(s2, out var silentAtt) && trackers.TryGetValue(vs2, out var silentVict))
         {
-            Report(silent, silent.OnHurt(silentAtt, silentVict, w, e.DmgHealth, Now()));
+            Report(silent, silent.OnHurt(silentAtt, silentVict, w, e.DmgHealth, Now(), hitgroup: e.Hitgroup));
 
             // --hurts: export the raw measurement for every such hurt (openers AND spray, flagged),
             // so the off-floor can be READ from the population instead of imported from kill data.

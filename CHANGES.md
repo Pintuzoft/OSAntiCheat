@@ -4,6 +4,53 @@ Version history for OSAntiCheat, newest first. Every release gets an entry here;
 describes the current state only. Player/admin names follow the pseudonym scheme from
 [TODO.md](TODO.md) (Cn = typed cheater, Gn = griefer, Rn = regular, An = admin).
 
+## v0.9.113 — the bullet went where the eyes did not (the eleventh typed cheater, in 83 seconds)
+
+A fresh account, two and a half minutes on the server across two maps (2026-09-20): one deagle
+headshot on the tail of de_island, then the pistol round on de_canals — four deagle headshots at
+789–1203 units inside 21 s, admin-kicked 83 s into the map. Chat before the round: "I will not die."
+The plugin raised nothing, the offline replay nothing, the geometry sweep nothing. The owner's read
+("aims two metres beside and lands the headshot") was exactly right, and it was silent aim, not snap:
+at every kill the replicated view sat 2–6° off the head with no step at the shot, and twice the
+crosshair was CLOSER to another enemy than to the one whose head the bullet found (Stern: view 5.8°
+off, AizZ 4.0° away behind a wall; ArMoKS: view 5.7° off, Skugan 1.9° away). All of it under the
+10° floor the silent-aim detector had.
+
+That floor was read from the all-weapon hurts tail — and rifles own that tail. Honest far (≥700u)
+headshot kills with the view >4° off the head: ak47 8.4%, m4a1 9.1%, mp9 15% (spray, recoil comp).
+A precision weapon at range has no such tail: deagle 0.07% (n=5,362; p99 1.94°, p99.9 3.55°, max
+5.07°), usp 0.06%, glock 0.14%, awp 0 of 1,184, scout 0.12%. Per attacker-session, TWO or more such
+hits: 0 honest of 42,342 — the single archive session at ≥2 is C5, the spin-silent cheater (3 of 5).
+The measure on this branch is the view-to-HEAD error at the kill tick; the detector's own
+(minimum over lag-comp candidates of the view-to-nearest-body error, head sample included) is
+never larger, so the honest rate under it can only be lower.
+
+- **aimbot.silent gains a far-precision grade.** A HEAD hit (player_hurt hitgroup 1) with a
+  precision weapon — deagle, R8, USP/P2000, glock, AWP, scout, autosnipers — at ≥700u counts from
+  `SilentAimFarOffDeg` (4°) instead of the flat 10°. One such hit is a 0.6 whisper (doubles another
+  axis, never a tier alone; 6 honest sessions of 42,342 hold one). A second DISTINCT victim on the
+  same map is the `silent-far-hs` edge, armed by default in `AutoActionEdges`
+  (`SilentAimFarMinVictims` = 2). C11 would have been kicked at the Stern kill, 37 s before the
+  admin did it by hand. Spray pistols and every rifle/SMG stay on the flat grade.
+- The far grade's victim memory is per map (`Reset` on map change), like the archive sessions it
+  was read from; the flat grade's rolling windows reset with it.
+- DemoReplay feeds the hurt's hitgroup, so demos replay the new grade. Replayed over every
+  local demo — 173 player-sessions in 12 maps, the C7–C10 lobbies and five plain evenings among
+  them — the grade speaks for exactly three sessions: C11 on canals (whisper at the TacoTony kill,
+  edge at Stern), C11 on island (one whisper), and C9 on boston 2026-08-14 (deagle headshots 5.6°
+  and 7.2° off at 841–856u, a scout headshot 12.6° off at 1,484u: whisper, then the edge 46 s
+  later — a second, independent edge on the cheater killburst kicked). Zero of the other 170.
+  C7, C8 and C10 stay silent, as their humanised-aim archetype should.
+- Open question from the same demo: the offline kill rows say Stern and AizZ were both never in
+  the killer's spotted mask (6 s apart), which is killburst's two-victim early warning — and the
+  live plugin said nothing. Hypothesis: the mask flipped during the ~0.4 s each victim was exposed
+  before the shot (the 20 Hz poll sees it; the demo's networked mask lags). Unverified; a
+  "seen-at-kill" debug line is the next step if it recurs.
+
+Six new tests: the whisper, the pair, the same-victim repeat, the gates (body hit, rifle, spray
+pistol, near range, view on the head), the lag-compensated head hit, the map reset. Config schema
+v30 → v31 (two keys added, one edge armed). 140 tests.
+
 ## v0.9.112 — a minute-old glimpse is not sight (the tenth typed cheater walked through)
 
 The same log that carried the mouse swipe carried a real one: a fresh account, two maps,

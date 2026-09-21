@@ -36,14 +36,14 @@ public class SilentAimDetectorTests
 
     // A first-of-burst bullet hit: history ticks first (so lag-comp has candidates), then the hurt.
     private Signal? Hit(SilentAimDetector d, PlayerTracker shooter, PlayerTracker victim,
-        float viewOffDeg, string weapon = "ak47", float victimX = 800f, float pauseSec = 1f)
+        float viewOffDeg, string weapon = "ak47", float victimX = 800f, float pauseSec = 1f, int hitgroup = -1)
     {
         _seq += (int)(pauseSec / TickDt);           // pause so this fire OPENS a burst
         var pos = new Vector3(victimX, 0f, 0f);
         for (int i = 0; i < 6; i++) Tick(shooter, victim, pos, viewOffDeg);
         float t = Now() - TickDt;
         d.NoteFire(shooter.Slot, t);
-        return d.OnHurt(shooter, victim, weapon, 30, t);
+        return d.OnHurt(shooter, victim, weapon, 30, t, hitgroup);
     }
 
     [Fact]
@@ -147,6 +147,98 @@ public class SilentAimDetectorTests
         float t = Now() - TickDt;
         d.NoteFire(shooter.Slot, t);
         Assert.Null(d.OnHurt(shooter, victim, "ak47", 30, t));
+    }
+
+    // ---- far-precision grade (v0.9.113, C11): head hit, precision weapon, ≥700u, view ≥4° off ----
+
+    [Fact]
+    public void Far_grade_first_precision_head_hit_off_view_is_a_whisper_without_edge()
+    {
+        var d = new SilentAimDetector();                 // defaults: flat 10°/3, far 4°/2 victims
+        var shooter = new PlayerTracker(64, slot: 1);
+        var victim = new PlayerTracker(64, slot: 2);
+
+        var s = Hit(d, shooter, victim, viewOffDeg: 5f, weapon: "deagle", hitgroup: 1);
+        Assert.NotNull(s);
+        Assert.Null(s!.Value.Edge);
+        Assert.Equal(0.6f, s.Value.Confidence, 2);
+        Assert.Contains("head hit", s.Value.Reason);
+    }
+
+    [Fact]
+    public void Far_grade_second_distinct_victim_fires_the_edge()
+    {
+        // C11 canals: TacoTony 4.6° at 1203u, then Stern 5.8° at 789u, 12.7 s apart — the pair no
+        // honest archive session holds.
+        var d = new SilentAimDetector();
+        var shooter = new PlayerTracker(64, slot: 1);
+        var v1 = new PlayerTracker(64, slot: 2);
+        var v2 = new PlayerTracker(64, slot: 3);
+
+        Assert.NotNull(Hit(d, shooter, v1, viewOffDeg: 5f, weapon: "deagle", hitgroup: 1));
+        var s = Hit(d, shooter, v2, viewOffDeg: 5f, weapon: "hkp2000", hitgroup: 1); // USP-S reports its base item
+        Assert.NotNull(s);
+        Assert.Equal("silent-far-hs", s!.Value.Edge);
+        Assert.Equal(1f, s.Value.Confidence);
+        Assert.Contains("2 different enemies", s.Value.Reason);
+    }
+
+    [Fact]
+    public void Far_grade_same_victim_twice_is_one_victim_and_no_edge()
+    {
+        var d = new SilentAimDetector();
+        var shooter = new PlayerTracker(64, slot: 1);
+        var v1 = new PlayerTracker(64, slot: 2);
+
+        Assert.NotNull(Hit(d, shooter, v1, viewOffDeg: 5f, weapon: "deagle", hitgroup: 1)); // whisper
+        Assert.Null(Hit(d, shooter, v1, viewOffDeg: 5f, weapon: "deagle", hitgroup: 1));    // same size: nothing new
+    }
+
+    [Fact]
+    public void Far_grade_needs_head_precision_weapon_and_range()
+    {
+        var d = new SilentAimDetector();
+        var shooter = new PlayerTracker(64, slot: 1);
+        var v = new PlayerTracker(64, slot: 2);
+
+        Assert.Null(Hit(d, shooter, v, viewOffDeg: 5f, weapon: "deagle", hitgroup: 2));               // body hit
+        Assert.Null(Hit(d, shooter, v, viewOffDeg: 5f, weapon: "ak47", hitgroup: 1));                 // rifle
+        Assert.Null(Hit(d, shooter, v, viewOffDeg: 5f, weapon: "p250", hitgroup: 1));                 // spray pistol
+        Assert.Null(Hit(d, shooter, v, viewOffDeg: 5f, weapon: "deagle", hitgroup: 1, victimX: 500f)); // near
+        Assert.Null(Hit(d, shooter, v, viewOffDeg: 2f, weapon: "deagle", hitgroup: 1));               // view on the head
+    }
+
+    [Fact]
+    public void Far_grade_lag_compensated_head_hit_stays_silent()
+    {
+        // View 6° off the victim's CURRENT position but exactly on where they stood a few ticks ago:
+        // an honest laggy headshot. The minimum over the lag-comp window must clear it.
+        var d = new SilentAimDetector();
+        var shooter = new PlayerTracker(64, slot: 1);
+        var victim = new PlayerTracker(64, slot: 2);
+
+        var oldPos = new Vector3(800f, 0f, 0f);
+        var newPos = new Vector3(800f, 84f, 0f);   // ~6° left of +X
+        for (int i = 0; i < 8; i++) Tick(shooter, victim, oldPos, 0f);
+        for (int i = 0; i < 2; i++) Tick(shooter, victim, newPos, 0f);
+        float t = Now() - TickDt;
+        d.NoteFire(shooter.Slot, t);
+        Assert.Null(d.OnHurt(shooter, victim, "deagle", 140, t, hitgroup: 1));
+    }
+
+    [Fact]
+    public void Far_grade_reset_forgets_the_map()
+    {
+        var d = new SilentAimDetector();
+        var shooter = new PlayerTracker(64, slot: 1);
+        var v1 = new PlayerTracker(64, slot: 2);
+        var v2 = new PlayerTracker(64, slot: 3);
+
+        Assert.NotNull(Hit(d, shooter, v1, viewOffDeg: 5f, weapon: "deagle", hitgroup: 1));
+        d.Reset();
+        var s = Hit(d, shooter, v2, viewOffDeg: 5f, weapon: "deagle", hitgroup: 1);
+        Assert.NotNull(s);
+        Assert.Null(s!.Value.Edge);                       // first victim of the new map: a whisper again
     }
 
     [Fact]

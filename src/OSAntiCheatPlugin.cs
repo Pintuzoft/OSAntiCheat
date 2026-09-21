@@ -140,7 +140,8 @@ public sealed class OSAntiCheatPlugin : BasePlugin, IPluginConfig<OSAntiCheatCon
         // (SpinbotMinRateDegPerSec is the per-tick spin floor; the continuous-turn gate is internal.)
         _boneLock = new BoneLockDetector(config.BoneLockSpikeDeg, config.BoneLockMinSpikes, config.BoneLockReacquireDeg);
         _recoil = new RecoilDetector(config.RecoilMaxRatio, config.RecoilMinSprays);
-        _silent = new SilentAimDetector(config.SilentAimOffDeg, config.SilentAimMinHits);
+        _silent = new SilentAimDetector(config.SilentAimOffDeg, config.SilentAimMinHits,
+            farOffDeg: config.SilentAimFarOffDeg, farMinVictims: config.SilentAimFarMinVictims);
         _antiAim = new AntiAimDetector(config.AntiAimPitchDeg, config.AntiAimJitterDeg, config.AntiAimJitterFlips);
         _airGain = new MovementAirGainDetector(
             config.AirGainMinArcs, config.AirGainSignalMedianGain, config.AirGainSignalMinPeakSpeed,
@@ -360,7 +361,8 @@ public sealed class OSAntiCheatPlugin : BasePlugin, IPluginConfig<OSAntiCheatCon
         var victimTracker = _tracking.For(victim.Slot);
         if (attackerTracker is null || victimTracker is null) return HookResult.Continue;
 
-        Report(_silent, _silent.OnHurt(attackerTracker, victimTracker, weapon, @event.DmgHealth, Server.CurrentTime));
+        Report(_silent, _silent.OnHurt(attackerTracker, victimTracker, weapon, @event.DmgHealth, Server.CurrentTime,
+            hitgroup: @event.Hitgroup));
         return HookResult.Continue;
     }
 
@@ -532,6 +534,7 @@ public sealed class OSAntiCheatPlugin : BasePlugin, IPluginConfig<OSAntiCheatCon
             "namechanger" => "NICK-CHANGER",
             "wallhack.killburst" => "WALLHACK (blind headshot burst)",
             "movement.airgain" => "BUNNYHOP SCRIPT (air-strafe beyond human)",
+            "aimbot.silent" => "SILENT AIM (bullets land where the crosshair is not)",
             _ => signal.Detector.ToUpperInvariant(),
         };
         // The verb must match what actually happened — "KICKED" while the frozen cheat is still
@@ -581,6 +584,8 @@ public sealed class OSAntiCheatPlugin : BasePlugin, IPluginConfig<OSAntiCheatCon
         _aimDrift.Reset();
         // Air-gain hop evidence is per-map for the same reason (and hop windows never span maps).
         _airGain.Reset();
+        // Silent aim's far-precision pair is counted per map, like the archive sessions it was read from.
+        _silent.Reset();
         _chatThrottle.Reset(); // fresh map, fresh notice budget per player
         if (string.IsNullOrWhiteSpace(Config.BakesDir))
         {
