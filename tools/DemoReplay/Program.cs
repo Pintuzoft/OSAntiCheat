@@ -211,6 +211,8 @@ var gatedTop = new List<(string att, ulong attId, string vict, int round, int ti
 var headSpikers = new List<(string name, ulong id, int spike, int n, string demo)>();
 var snapHits = new List<(string name, ulong id, int snaps, int shots, float bestPrev, float bestFire, string demo)>();
 var silentAlerts = new List<(string name, ulong id, int signals, string demo)>();
+var killBurstEdges = new List<(string name, ulong id, int signals, string demo)>();     // ≥4 distinct blind HS victims: the edge
+var killBurstWhispers = new List<(string name, ulong id, int signals, string demo)>();  // 2–3 victims: fusion whisper / rare
 var antiAimAlerts = new List<(string name, ulong id, int signals, string demo)>();
 var nullTestHits = new List<(string name, ulong id, float excess, int n, string demo)>();
 var gainResults = new List<(string name, ulong id, float slope, float corr, int n, float deg, float audSlope, int audN, string demo)>();
@@ -355,6 +357,13 @@ await Parallel.ForEachAsync(demoFiles, new ParallelOptions { MaxDegreeOfParallel
                 foreach (var r in results)
                     if (r.Signals.GetValueOrDefault("antiaim") is > 0 and var aa)
                         antiAimAlerts.Add((r.Name, r.SteamId, aa, Path.GetFileName(file)));
+                foreach (var r in results)
+                {
+                    int kbAll = r.Signals.GetValueOrDefault("wallhack.killburst");
+                    int kbEdge = r.Signals.GetValueOrDefault("wallhack.killburst!edge");
+                    if (kbEdge > 0) killBurstEdges.Add((r.Name, r.SteamId, kbEdge, Path.GetFileName(file)));
+                    else if (kbAll > 0) killBurstWhispers.Add((r.Name, r.SteamId, kbAll, Path.GetFileName(file)));
+                }
                 foreach (var r in results)
                     if (r.UnseenSamples >= cfg.NullTestMinSamples &&
                         (r.UnseenNow - r.UnseenPast) / (float)r.UnseenSamples >= cfg.NullTestMinExcess)
@@ -523,6 +532,8 @@ if (recoilResults.Count > 0)
     { t1++; Console.WriteLine($"  [silent]      {s.signals} signal(s): registered hits with view off the victim  {s.name,-20} {s.id}  [{s.demo}]"); }
     foreach (var s in antiAimAlerts.OrderByDescending(s => s.signals))
     { t1++; Console.WriteLine($"  [antiaim]     {s.signals} signal(s): fake pitch / alternating yaw jitter  {s.name,-20} {s.id}  [{s.demo}]"); }
+    foreach (var s in killBurstEdges.OrderByDescending(s => s.signals))
+    { t1++; Console.WriteLine($"  [killburst]   {s.signals} edge(s): ≥4 headshots in 15 s on distinct enemies never/stale-seen  {s.name,-20} {s.id}  [{s.demo}]"); }
     foreach (var r in recoilResults.Where(r => r.ratio <= cfg.AntiRecoilMaxRatio && r.sprays >= cfg.AntiRecoilMinSprays).OrderBy(r => r.ratio))
     { t1++; Console.WriteLine($"  [anti-recoil] ratio {r.ratio:F3} over {r.sprays} sprays  {r.name,-20} {r.id}  [{r.demo}]"); }
     if (t1 == 0) Console.WriteLine("     (none — machine zone empty)");
@@ -535,6 +546,8 @@ if (recoilResults.Count > 0)
     { t2++; Console.WriteLine($"  [deadaim]     {k.gated,6:F3}  {k.att,-20} -> {k.vict,-16} {k.weap,-10} r{k.round} tick {k.tick}  [{k.demo}]"); }
     foreach (var n in nullTestHits.OrderByDescending(n => n.excess))
     { t2++; Console.WriteLine($"  [null-test]   excess {n.excess:P1} (n={n.n})  {n.name,-20} {n.id}  [{n.demo}]"); }
+    foreach (var s in killBurstWhispers.OrderByDescending(s => s.signals))
+    { t2++; Console.WriteLine($"  [killburst]   {s.signals} whisper(s): 2 never-seen (0.4) / 3 blind-or-stale (0.65) headshots in 15 s, no edge  {s.name,-20} {s.id}  [{s.demo}]"); }
     if (t2 == 0) Console.WriteLine("     (none at these thresholds)");
 
     Console.WriteLine($"\nRecoil ratio (spread/pull; lower = more machine-like) over {recoilResults.Count} sessions (>=4 sprays):");
@@ -674,6 +687,10 @@ static async Task<(List<PlayerResult> players, List<ShotRow> shots, List<KillRow
     var snap = new SnapDetector();
     var silent = new SilentAimDetector();
     var antiAim = new AntiAimDetector();
+    // wallhack.killburst on the same feed the plugin has since v0.9.114: sight memory from the
+    // spotted mask (per tick here, 20 Hz live) plus the victim's mask read at the kill itself.
+    // Before this the replay never ran killburst at all — "offline silent" meant nothing for it.
+    var killBurst = new KillBurstDetector();
     var engine = new SuspicionEngine();
 
     var peakScore = new Dictionary<int, float>();
@@ -1008,6 +1025,10 @@ static async Task<(List<PlayerResult> players, List<ShotRow> shots, List<KillRow
     {
         if (signal is not { } s) return;
         signals[(s.PlayerSlot, s.Detector)] = signals.GetValueOrDefault((s.PlayerSlot, s.Detector)) + 1;
+        // Edge-carrying signals (the auto-action grade) are counted under "<detector>!edge" as
+        // well, so the DETECTIONS tiers can tell a kick-grade burst from a fusion whisper.
+        if (s.Edge is not null)
+            signals[(s.PlayerSlot, s.Detector + "!edge")] = signals.GetValueOrDefault((s.PlayerSlot, s.Detector + "!edge")) + 1;
         engine.Report(s, detector.Weight);
     }
 
@@ -1170,6 +1191,16 @@ static async Task<(List<PlayerResult> players, List<ShotRow> shots, List<KillRow
         int aSlot = (int)att.EntityIndex.Value - 1;
         int vSlot = (int)victim.EntityIndex.Value - 1;
         if (aSlot < 0 || vSlot < 0) return;
+
+        // wallhack.killburst: enemy bullet headshots, as live. The victim's mask at the kill tick
+        // is read first (v0.9.114) — a sighting that opens two ticks before the shot is sight.
+        if (e.Headshot && att.Team != victim.Team)
+        {
+            var vm = victim.PlayerPawn?.EntitySpottedState?.SpottedByMask;
+            if (vm is not null && SpottedMask.IsSetFor(vm, aSlot)) killBurst.NoteSeen(aSlot, vSlot, Now());
+            Report(killBurst, killBurst.OnKill(aSlot, vSlot, victim.PlayerName ?? "?", headshot: true, Now()));
+        }
+
         if (!trackers.TryGetValue(aSlot, out var aTr) || !trackers.TryGetValue(vSlot, out var vTr)) return;
 
         // Spinbot's real signature (owner): a HEADSHOT KILL landed mid-spin, where the spin is >360° of
@@ -1725,7 +1756,11 @@ static async Task<(List<PlayerResult> players, List<ShotRow> shots, List<KillRow
             // Continuous "last seen" per (observer, victim) pair — the mask ring only holds 2s, but
             // "when did the attacker LAST legitimately see this enemy" needs whole-round memory.
             for (ulong bits = packed; bits != 0; bits &= bits - 1)
-                lastSpottedAt[(System.Numerics.BitOperations.TrailingZeroCount(bits), s)] = now;
+            {
+                int obs = System.Numerics.BitOperations.TrailingZeroCount(bits);
+                lastSpottedAt[(obs, s)] = now;
+                killBurst.NoteSeen(obs, s, now);
+            }
 
             // Rising edge: which enemies just got their FIRST sight of this pawn? Anchor a reaction
             // encounter for each — where was the observer's crosshair when the stimulus appeared,

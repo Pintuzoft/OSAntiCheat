@@ -34,6 +34,16 @@ what the 0.04% tier was accepted as. No lobby gate.
   gap in the other direction and stays open; this release only makes live at least as lenient
   as the archive at the kill itself.
 
+- **DemoReplay now runs killburst** (same day, tools only): the detector the plugin runs, on
+  the same feed — sight memory from the spotted mask per tick, plus the victim's mask at the
+  kill. Until now the replay never ran it, so "offline silent" said nothing about killburst;
+  the kill rows' sight column was the only instrument. Edge-grade signals are counted under
+  `<detector>!edge` and the DETECTIONS tiers list killburst edges (tier 1) and whispers (tier 2).
+  Replayed: the R18 evening stays silent for R18; C8's seabase ace fires the edge twice (peak
+  4.35) with one honest 0.4 whisper in the lobby; C9 boston and C11 canals each get the
+  never-seen pair whisper on top of their silent-aim edges (3.14, 3.24). C11's pair is the gap
+  in the other direction made visible: the demo's mask never showed either victim, live's did.
+
 Three new tests: the R18 sequence (two stale victims around a kill-tick sighting stays silent)
 and the mask helper's two words. No config change (schema v31). 143 tests.
 
