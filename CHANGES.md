@@ -4,6 +4,39 @@ Version history for OSAntiCheat, newest first. Every release gets an entry here;
 describes the current state only. Player/admin names follow the pseudonym scheme from
 [TODO.md](TODO.md) (Cn = typed cheater, Gn = griefer, Rn = regular, An = admin).
 
+## v0.9.114 — a glimpse at the trigger is still a glimpse (the first stale-grade alert was a regular)
+
+Four quiet evenings after v0.9.113 (2026-09-21→24: 758 log rows, ~50 players, aim.drift at zero
+alerts for 32 days now) carried one alert, and it was the first thing the v0.9.112 stale grade
+ever raised: R18, a regular with fifty play-days in the log, three deagle headshots in 10.4 s on
+de_foroglio in a 3v3, Watch at 1.04, "several quick headshots on players they never saw". No
+admin was online to read it. The demo says otherwise on every axis (no tier, head error median
+1.7°, recoil ratio 0.79, 23% hit rate) and the burst itself comes apart on the kill rows: two
+victims were last seen in the pistol round (32.8 s and 45.8 s earlier — stale by the rule, and
+correctly so), and the third died at 79 units in a corner meeting, spotted by the killer two
+ticks (31 ms) before the shot. The archive instrument every killburst rate was read from — the
+mask as it stands at the kill — calls that victim seen, so the burst is two stale victims, below
+the three-victim grade, and nothing fires. Live called him blind, because the plugin's sight
+memory had only one feed, the 20 Hz poll, and a sighting that opens under 50 ms before the kill
+never reaches it. The plugin was stricter than its own calibration.
+
+Lobby size was the tempting explanation and it is not one: the archive's stale-grade triples
+sit in the big lobbies (0 of 3,919 attacker-sessions with 2–6 players, 18 of 30,647 with 9+),
+and the sixteen honest ones are the server's best regulars — a stammis-ace signature, which is
+what the 0.04% tier was accepted as. No lobby gate.
+
+- **Sight at the kill tick counts as sight.** The death handler reads the victim's spotted
+  mask for the killer before asking killburst, and notes the sighting if the bit is set — the
+  same read the offline kill rows make. Two ticks of sight is sight.
+- The mask bit maths moves into one helper (`SpottedMask.IsSetFor`) shared by the poll, the
+  kill handler and `css_osac_los`, so the three cannot drift apart.
+- The C11 open question from v0.9.113 (offline never-seen, live silent) is the same instrument
+  gap in the other direction and stays open; this release only makes live at least as lenient
+  as the archive at the kill itself.
+
+Three new tests: the R18 sequence (two stale victims around a kill-tick sighting stays silent)
+and the mask helper's two words. No config change (schema v31). 143 tests.
+
 ## v0.9.113 — the bullet went where the eyes did not (the eleventh typed cheater, in 83 seconds)
 
 A fresh account, two and a half minutes on the server across two maps (2026-09-20): one deagle

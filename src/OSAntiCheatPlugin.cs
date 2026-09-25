@@ -393,9 +393,19 @@ public sealed class OSAntiCheatPlugin : BasePlugin, IPluginConfig<OSAntiCheatCon
             if (bullet && victim is not null && victim.IsValid &&
                 victim.Slot != attacker.Slot && victim.Team != attacker.Team)
             {
+                float now = Server.CurrentTime;
+                // Sight at the kill tick is sight. The 20 Hz poll is the sight memory's only other
+                // feed, and a victim who steps into view under 50 ms before the shot — the
+                // point-blank corner meeting — never reaches it: R18, 2026-09-24 foroglio, was
+                // spotted by the killer two ticks (31 ms) before the kill, the archive instrument
+                // (mask read at the kill) calls that seen, live counted it blind and raised a
+                // Watch on a regular. Read the mask here, the way the calibration did.
+                if (victim.PlayerPawn.Value is { } victimPawn &&
+                    SpottedMask.IsSetFor(victimPawn.EntitySpottedState.SpottedByMask, attacker.Slot))
+                    _killBurst.NoteSeen(attacker.Slot, victim.Slot, now);
                 Report(_killBurst, _killBurst.OnKill(
                     attacker.Slot, victim.Slot, victim.PlayerName ?? "?",
-                    headshot: true, Server.CurrentTime));
+                    headshot: true, now));
             }
         }
         return HookResult.Continue;
@@ -663,8 +673,7 @@ public sealed class OSAntiCheatPlugin : BasePlugin, IPluginConfig<OSAntiCheatCon
                 if (ep is null || ep.AbsOrigin is null) continue;
 
                 var mask = ep.EntitySpottedState.SpottedByMask;
-                bool spottedByObserver = (mask[slot / 32] & (1u << (slot % 32))) != 0;
-                if (spottedByObserver)
+                if (SpottedMask.IsSetFor(mask, slot))
                 {
                     // Sight memory for the blind-HS-burst edge: a recent sighting disqualifies this
                     // victim for this attacker; one older than KillBurstBlindAfterSeconds goes stale.
@@ -860,8 +869,7 @@ public sealed class OSAntiCheatPlugin : BasePlugin, IPluginConfig<OSAntiCheatCon
         var spottedState = bestPawn.EntitySpottedState;
         bool spottedByAnyone = spottedState.Spotted;
         int slot = player.Slot;
-        bool spottedByYou =
-            (spottedState.SpottedByMask[slot / 32] & (1u << (slot % 32))) != 0;
+        bool spottedByYou = SpottedMask.IsSetFor(spottedState.SpottedByMask, slot);
 
         string report =
             $"nearest enemy {best!.PlayerName}: aimErr={bestErr:F1}° " +

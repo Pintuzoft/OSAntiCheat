@@ -115,7 +115,7 @@ honest baseline:
 - **`blind-hs-burst`** (v0.9.92) — four headshot kills inside 15 s on four *different* enemies
   the killer has not had spotted for 30 s, or ever, on the map. The archive's 321k kills hold exactly two
   such bursts, both typed cheaters; the first live-caught wall+aim account would have been
-  kicked at kill four of its six-kill ace. Two never-seen kills are a fusion whisper (0.4); three blind kills under the stale-sighting grade (a victim not spotted for `KillBurstBlindAfterSeconds`, 30 s, is blind again — v0.9.112) a rare one (0.65; 19 of 42,342 archive attacker-sessions, 17 honest); never an edge below four.
+  kicked at kill four of its six-kill ace. Two never-seen kills are a fusion whisper (0.4); three blind kills under the stale-sighting grade (a victim not spotted for `KillBurstBlindAfterSeconds`, 30 s, is blind again — v0.9.112) a rare one (0.65; 19 of 42,342 archive attacker-sessions, 17 honest); never an edge below four. Sight is read from the spotted mask at the kill itself as well as from the 20 Hz poll (v0.9.114), so a victim who steps into view a tick before the shot is seen, as the archive counted him.
 - **`airgain-chain`** (v0.9.101) — ≥5 chained jump arcs with median mid-air gain ≥ +40 u/s at
   median peak ≥ 300 u/s. Its response is not the kick but a **freeze**: the pawn is parked in
   place and disarmed for the rest of the round (`AirGainFreezeSeconds`, a public "speeding

@@ -103,6 +103,24 @@ public sealed class KillBurstDetectorTests
     }
 
     [Fact]
+    public void Kill_tick_sighting_between_two_stale_victims_stays_silent()
+    {
+        // R18, 2026-09-24 foroglio (3v3, round two): two deagle headshots on enemies last seen
+        // in the pistol round (32.8 s and 45.8 s earlier — stale) around a point-blank kill on
+        // an enemy who stepped into view 31 ms before the shot. The plugin now notes that
+        // kill-tick sighting before asking; two stale victims are below the three-victim grade
+        // and neither is never-seen, so nothing may fire — the live Watch this reproduces was
+        // the poll missing that sighting.
+        var d = new KillBurstDetector(minKills: 4, windowSeconds: 15f, blindAfterSeconds: 30f);
+        d.NoteSeen(observer: 1, enemy: 10, now: 34.0f);  // pistol round
+        d.NoteSeen(observer: 1, enemy: 12, now: 31.4f);  // pistol round (killed him then)
+        Assert.Null(d.OnKill(1, 10, "Urk", headshot: true, now: 66.8f));   // stale: counts from three
+        d.NoteSeen(observer: 1, enemy: 11, now: 72.5f);                     // spotted at the kill tick
+        Assert.Null(d.OnKill(1, 11, "Soc", headshot: true, now: 72.5f));   // seen: no count, no break
+        Assert.Null(d.OnKill(1, 12, "Zti", headshot: true, now: 77.2f));   // second stale: still two
+    }
+
+    [Fact]
     public void Repeat_kills_on_same_victim_do_not_reach_distinct_floor()
     {
         // Respawn modes: farming one never-seen player is a rate artifact, not information.
